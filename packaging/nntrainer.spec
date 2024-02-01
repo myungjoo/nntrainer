@@ -47,7 +47,7 @@
 %endif # 0%{tizen_version_major}%{tizen_version_minor} >= 65
 
 %define enable_fp16 0
-%ifarch aarch64
+%ifarch aarch64 %arm
 %define enable_fp16 1
 # x64/x86 requires GCC >= 12 for fp16 support.
 %endif
@@ -396,6 +396,10 @@ CXXFLAGS=`echo $CXXFLAGS | sed -e "s|-std=gnu++11||"`
 export CFLAGS+=" -fprofile-arcs -ftest-coverage"
 export CXXFLAGS+=" -fprofile-arcs -ftest-coverage"
 %endif
+%ifarch aarch64
+export CXXFLAGS="${CXXFLAGS/-march=armv8-a/-march=armv8.2-a+fp16}"
+export CFLAGS="${CFLAGS/-march=armv8-a/-march=armv8.2-a+fp16}"
+%endif
 
 # Add backward competibility for tizen < 6
 %if 0%{tizen_version_major} < 6
@@ -563,6 +567,9 @@ cp -r result %{buildroot}%{_datadir}/nntrainer/unittest/
 %{_includedir}/nntrainer/util_func.h
 %{_includedir}/nntrainer/fp16.h
 %{_includedir}/nntrainer/util_simd.h
+%if 0%{?enable_fp16}
+%{_includedir}/nntrainer/util_simd_neon.h
+%endif
 
 %files devel-static
 %{_libdir}/libnntrainer*.a

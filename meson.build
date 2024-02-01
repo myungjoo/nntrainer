@@ -59,6 +59,12 @@ if get_option('enable-fp16')
    arch = target_machine.cpu_family()
    if get_option('platform') == 'android'
      add_project_arguments('-mfp16-format=ieee', language: ['c', 'cpp'])
+     if cxx.has_argument('-mfpu=neon-fp16')
+       add_project_arguments('-mfpu=neon-fp16', language: ['c', 'cpp'])
+       message('mfpu=neon-fp16 is enabled for faster fp16-double conversion')
+     else
+       message('mfpu=neon-fp16 is not available. Use a better compiler for faster fp16-double conversion')
+     endif
      extra_defines += '-DENABLE_FP16=1'
      extra_defines += '-DUSE__FP16=1'
      extra_defines += '-DUSE_NEON=1'
@@ -69,10 +75,15 @@ if get_option('enable-fp16')
      #   via the __fp16 type defined in the ARM C Language Extensions.
      # On ARM systems, you must enable this type explicitly with the -mfp16-format
      #   command-line option in order to use it.
+     #
+     # One more thing to note is that you need mfpv3-neon or march=armv8.2-a+fp16
+     # which is supported by Cortex A55/75 or later, but probably not supported by
+     # Cortex A53 while Tizen default build assumes that we need to support A53.
+     #  A311D: A73+A53 (no armv8.2 support?)
      if cxx.has_argument('-mfp16-format=ieee')
        add_project_arguments('-mfp16-format=ieee', language: ['c', 'cpp'])
      else
-       message ('The compiler does not support -mfp16-format=ieee. However, according to https://gcc.gnu.org/onlinedocs/gcc-9.1.0/gcc/Half-Precision.html, gcc may use IEEE fp16 anyway. Thus, we will proceed without the option for FP16 support.')
+       warning('The compiler does not support -mfp16-format=ieee.')
      endif
      extra_defines += '-DENABLE_FP16=1'
      extra_defines += '-DUSE__FP16=1'
@@ -84,7 +95,7 @@ if get_option('enable-fp16')
        extra_defines += '-DUSE__FP16=1'
        extra_defines += '-DUSE_NEON=1'
      else
-       error ('The compiler does not support -mfp16-format=ieee')
+       error('The compiler does not support -mfp16-format=ieee')
      endif
    else
      has_avx512fp16 = cc.has_argument('-mavx512fp16')
