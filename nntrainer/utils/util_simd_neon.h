@@ -17,6 +17,11 @@
 #define VL_FP16 8
 namespace nntrainer::neon {
 
+class compute_neon: public compute {
+public:
+compute_neon()
+~compute_neon()
+
 /**
  * @brief Get half-sized angles, transform them into each cos, sin, and scopy in
  * the same vector : cos_ = cos(freq).extend(cos(freq)), sin_ =
@@ -29,7 +34,7 @@ namespace nntrainer::neon {
  * @param alpha scaling factor
  */
 void calc_trigonometric_vals_dup(unsigned int N_half, float *angle, float *cos_,
-                                 float *sin_, unsigned int alpha = 1.0);
+                                 float *sin_, unsigned int alpha = 1.0) override;
 
 /**
  * @brief swish function with neon : X = (Y / (1 + exp( -Y ))) * Z
@@ -39,7 +44,7 @@ void calc_trigonometric_vals_dup(unsigned int N_half, float *angle, float *cos_,
  * @param Y float * for Vector Y
  * @param Z float * for Vector Z
  */
-void swish(const unsigned int N, float *X, float *Y, float *Z);
+void swish(const unsigned int N, float *X, float *Y, float *Z) override;
 #ifdef ENABLE_FP16
 /**
  * @brief Accelerating function for rotary embedding layer forwarding
@@ -54,7 +59,7 @@ void swish(const unsigned int N, float *X, float *Y, float *Z);
  */
 void compute_rotary_embedding_value(unsigned int dim, unsigned int half_,
                                     unsigned int w, __fp16 *in, __fp16 *out,
-                                    float *cos_, float *sin_);
+                                    float *cos_, float *sin_) override;
 /**
  * @brief swish function with neon : X = (Y / (1 + exp( -Y ))) * Z
  *
@@ -63,8 +68,9 @@ void compute_rotary_embedding_value(unsigned int dim, unsigned int half_,
  * @param Y __fp16 * for Vector Y
  * @param Z __fp16 * for Vector Z
  */
-void swish(const unsigned int N, __fp16 *X, __fp16 *Y, __fp16 *Z);
+void swish(const unsigned int N, __fp16 *X, __fp16 *Y, __fp16 *Z) override;
 #endif
+}; // class compute_neon
 
 } // namespace nntrainer::neon
 

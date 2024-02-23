@@ -130,6 +130,7 @@ private:
   std::array<unsigned int, 16>
     weight_idx; /**< indices of the weights and tensors */
 
+  compute *cmp; /**< The compute instance cached  */
   /**
    * @brief     to protect overflow
    */
@@ -164,19 +165,8 @@ private:
       sin->assign(seq_len, std::vector<float>(dim, 0));
 
       for (unsigned int i = 0; i < seq_len; ++i) {
-#ifdef USE_NEON
-        calc_trigonometric_vals_dup(half_, freqs.data(), (*cos)[i].data(),
+        cmp->calc_trigonometric_vals_dup(half_, freqs.data(), (*cos)[i].data(),
                                     (*sin)[i].data(), i);
-#else
-        for (unsigned int j = 0; j < half_; ++j) {
-          float angle = i * freqs[j];
-          (*cos)[i][j] = std::cos(angle);
-          (*cos)[i][j + half_] = std::cos(angle); // repeated 2 times
-
-          (*sin)[i][j] = std::sin(angle);
-          (*sin)[i][j + half_] = std::sin(angle); // repeated 2 times
-        }
-#endif
       }
       freqs_cos = cos;
       freqs_sin = sin;
@@ -204,19 +194,8 @@ private:
     if (from >= max_timestep) {
       cos_ = new std::vector<float>(dim);
       sin_ = new std::vector<float>(dim);
-#ifdef USE_NEON
-      calc_trigonometric_vals_dup(half_, freqs.data(), cos_->data(),
+      cmp->calc_trigonometric_vals_dup(half_, freqs.data(), cos_->data(),
                                   sin_->data(), from);
-#else
-      for (unsigned int i = 0; i < half_; ++i) {
-        float angle = from * freqs[i];
-        (*cos_)[i] = std::cos(angle);
-        (*cos_)[i + half_] = std::cos(angle); // repeated 2 times
-
-        (*sin_)[i] = std::sin(angle);
-        (*sin_)[i + half_] = std::sin(angle); // repeated 2 times
-      }
-#endif
     }
 
     if (in.getDataType() == ml::train::TensorDim::DataType::FP32) {

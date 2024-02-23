@@ -16,49 +16,50 @@
 
 namespace nntrainer {
 
-void calc_trigonometric_vals_dup(unsigned int N_half, float *angle, float *cos_,
-                                 float *sin_, unsigned int alpha) {
-#ifdef USE_NEON
-  nntrainer::neon::calc_trigonometric_vals_dup(N_half, angle, cos_, sin_,
-                                               alpha);
-#else
-  throw std::invalid_argument(
-    "Error: No implementation of rotary embedding layer incremental_forwarding "
-    "with SIMD acceleration except for NEON!");
-#endif
+
+constexpr auto compute::the_instance = nullptr;
+
+compute::compute() {
+} // Do nothing
+
+compute::~compute() {
+  // Do nothing
 }
 
-void swish(const unsigned int N, float *X, float *Y, float *Z) {
-#ifdef USE_NEON
-  nntrainer::neon::swish(N, X, Y, Z);
-#else
+void compute::calc_trigonometric_vals_dup(unsigned int N_half, float *angles,
+    float *cos_, float *sin_, unsigned int alpha) {
+  for (unsigned int j = 0; j < N_half; ++j) {
+    float angle = alpha * angles[j];
+    (*cos)[alpha][j] = std::cos(angle);
+    (*cos)[alpha][j + N_half] = std::cos(angle); // repeated 2 times
+
+    (*sin)[alpha][j] = std::sin(angle);
+    (*sin)[alpha][j + N_half] = std::sin(angle); // repeated 2 times
+  }
+}
+
+void compute::swish(const unsigned int N, float *X, float *Y, float *Z)
+{
   unsigned int i = 0;
   while (i < N) {
     X[i] = (Y[i] / (1.f + std::exp(-Y[i]))) * Z[i];
     ++i;
   }
-#endif
+}
+
 }
 
 #ifdef ENABLE_FP16
 
-void compute_rotary_embedding_value(unsigned int dim, unsigned int half_,
+void compute::compute_rotary_embedding_value(unsigned int dim, unsigned int half_,
                                     unsigned int w, _FP16 *in, _FP16 *out,
                                     float *cos_, float *sin_) {
-#ifdef USE_NEON
-  nntrainer::neon::compute_rotary_embedding_value(dim, half_, w, in, out, cos_,
-                                                  sin_);
-#else
   throw std::invalid_argument(
     "Error: No implementation of rotary embedding layer incremental_forwarding "
     "with SIMD acceleration except for NEON!");
-#endif
 }
 
-void swish(const unsigned int N, _FP16 *X, _FP16 *Y, _FP16 *Z) {
-#ifdef USE_NEON
-  nntrainer::neon::swish(N, X, Y, Z);
-#else
+void compute::swish(const unsigned int N, _FP16 *X, _FP16 *Y, _FP16 *Z) {
   unsigned int i = 0;
   while (i < N) {
     X[i] =
@@ -66,8 +67,24 @@ void swish(const unsigned int N, _FP16 *X, _FP16 *Y, _FP16 *Z) {
       Z[i];
     ++i;
   }
-#endif
 }
 #endif
+
+compute *compute::get_instance()
+{
+  // Return the derived instance of the proper arch.
+  if (the_instance)
+    return the_instance;
+#ifdef USE_NEON
+  the_instance = new compute_neon();
+#elif USE_AVX
+  the_instance = new compute_avx();
+#elif USE_RVV
+  the_instance = new compute_rvv();
+#else
+  the_instance = new compute();
+#endif
+  return the_instance;
+}
 
 } // namespace nntrainer
