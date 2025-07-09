@@ -574,7 +574,27 @@ if get_option('enable-ggml')
     if get_option('platform') == 'android'
       message('preparing ggml for Android')
       run_command([meson.source_root() / 'jni' / 'prepare_ggml.sh', ggml_root ], check: true)
-  endif
+    else
+      # Add install scripts for GGML libraries and headers for non-Android platforms
+      ggml_build_libdir = meson.build_root() / 'subprojects' / 'ggml' / 'src'
+      ggml_source_includedir = ggml_root / 'include'
+      
+      # Install GGML shared libraries
+      meson.add_install_script(
+        'sh', '-c', 'find @0@ -name "*.so*" -exec cp {} ${DESTDIR}@1@ \\;'.format(ggml_build_libdir, nntrainer_libdir)
+      )
+      
+      # Install GGML headers
+      meson.add_install_script(
+        'sh', '-c', 'cp -r @0@/* ${DESTDIR}@1@/'.format(ggml_source_includedir, nntrainer_includedir)
+      )
+      
+      # Install additional GGML headers from src directory  
+      ggml_source_srcdir = ggml_root / 'src'
+      meson.add_install_script(
+        'sh', '-c', 'find @0@ -name "*.h" -exec cp {} ${DESTDIR}@1@/ \\;'.format(ggml_source_srcdir, nntrainer_includedir)
+      )
+    endif
   endif
 
   extra_defines += '-DENABLE_GGML=1'
