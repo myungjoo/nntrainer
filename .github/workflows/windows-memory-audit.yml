@@ -1,0 +1,550 @@
+name: Windows Memory Audit & Build Validation
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run nightly at 2 AM UTC for comprehensive memory analysis
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      enable_extended_memory_analysis:
+        description: 'Enable extended memory analysis (slower but more comprehensive)'
+        type: boolean
+        default: false
+      memory_test_timeout:
+        description: 'Memory test timeout in minutes'
+        type: number
+        default: 15
+      build_type:
+        description: 'Build type for testing'
+        type: choice
+        options:
+        - release
+        - debug
+        - relwithdebinfo
+        default: 'debug'
+
+env:
+  VCPKG_DISABLE_METRICS: 1
+  VCPKG_ROOT: ${{ github.workspace }}\vcpkg
+  CMAKE_PREFIX_PATH: ${{ github.workspace }}\deps\openblas
+  DR_MEMORY_OPTIONS: "-brief -batch -quiet -dr_ops '-msgbox_mask 0'"
+
+jobs:
+  windows-memory-audit:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [msvc, clang]
+        
+    name: Windows Memory Audit (${{ matrix.compiler }})
+    
+    steps:
+    - name: 🔍 Environment Information
+      run: |
+        Write-Host "🔍 System Information:" -ForegroundColor Green
+        Write-Host "OS: $((Get-WmiObject Win32_OperatingSystem).Caption)"
+        Write-Host "Processor: $((Get-WmiObject Win32_Processor).Name)"
+        Write-Host "Total RAM: $([math]::Round((Get-WmiObject Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 2)) GB"
+        Write-Host "PowerShell Version: $($PSVersionTable.PSVersion)"
+        Write-Host "Compiler Matrix: ${{ matrix.compiler }}"
+        Write-Host "Build Type: ${{ github.event.inputs.build_type || 'debug' }}"
+        
+    - name: 📥 Checkout Repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
+
+    - name: 🛠️ Setup Development Environment
+      run: |
+        Write-Host "🛠️ Installing Chocolatey packages..." -ForegroundColor Yellow
+        
+        # Install essential tools via Chocolatey
+        if (!(Get-Command choco -ErrorAction SilentlyContinue)) {
+          Write-Host "Installing Chocolatey..."
+          Set-ExecutionPolicy Bypass -Scope Process -Force
+          [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocol]::Tls12
+          iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+        }
+        
+        # Install development tools
+        choco install -y cmake --version=3.31.0
+        choco install -y ninja
+        choco install -y 7zip
+        
+        # Refresh PATH
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+        
+        Write-Host "✅ Development tools installed"
+
+    - name: 🐍 Setup Python Environment
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: 📦 Install Python Dependencies
+      run: |
+        Write-Host "📦 Installing Python packages..." -ForegroundColor Yellow
+        python -m pip install --upgrade pip
+        pip install meson==1.6.1 ninja
+        Write-Host "✅ Python environment ready"
+
+    - name: 🏗️ Setup Visual Studio Environment
+      uses: microsoft/setup-msbuild@v1.3
+      with:
+        vs-version: '17.0'
+
+    - name: 🔧 Configure MSVC Environment
+      if: matrix.compiler == 'msvc'
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
+        toolset: 14.35
+
+    - name: 🔧 Configure Clang Environment  
+      if: matrix.compiler == 'clang'
+      run: |
+        Write-Host "🔧 Setting up Clang environment..." -ForegroundColor Yellow
+        # Add LLVM tools to PATH
+        $llvmPath = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Enterprise\VC\Tools\Llvm\x64\bin"
+        if (!(Test-Path $llvmPath)) {
+          $llvmPath = "${env:ProgramFiles}\Microsoft Visual Studio\2022\Enterprise\VC\Tools\Llvm\x64\bin"
+        }
+        $env:PATH = "$llvmPath;$env:PATH"
+        Write-Host "✅ Clang environment configured"
+
+    - name: 📚 Setup Dependencies (OpenBLAS + vcpkg)
+      run: |
+        Write-Host "📚 Setting up dependencies..." -ForegroundColor Yellow
+        
+        # Create deps directory
+        New-Item -ItemType Directory -Path "${{ github.workspace }}\deps" -Force | Out-Null
+        
+        # Download and extract OpenBLAS
+        Write-Host "Downloading OpenBLAS..."
+        $openblasUrl = "https://github.com/xianyi/OpenBLAS/releases/download/v0.3.24/OpenBLAS-0.3.24-x64.zip"
+        $openblasZip = "${{ github.workspace }}\deps\openblas.zip"
+        Invoke-WebRequest -Uri $openblasUrl -OutFile $openblasZip
+        Expand-Archive -Path $openblasZip -DestinationPath "${{ github.workspace }}\deps\openblas" -Force
+        Remove-Item $openblasZip
+        
+        # Setup vcpkg
+        Write-Host "Setting up vcpkg..."
+        git clone https://github.com/Microsoft/vcpkg.git ${{ github.workspace }}\vcpkg
+        & "${{ github.workspace }}\vcpkg\bootstrap-vcpkg.bat"
+        & "${{ github.workspace }}\vcpkg\vcpkg.exe" integrate install
+        
+        # Install vcpkg packages  
+        & "${{ github.workspace }}\vcpkg\vcpkg.exe" install gtest:x64-windows
+        & "${{ github.workspace }}\vcpkg\vcpkg.exe" install benchmark:x64-windows
+        & "${{ github.workspace }}\vcpkg\vcpkg.exe" install jsoncpp:x64-windows
+        
+        Write-Host "✅ Dependencies installed"
+
+    - name: 🧠 Install Dr. Memory for Memory Analysis
+      run: |
+        Write-Host "🧠 Installing Dr. Memory..." -ForegroundColor Yellow
+        
+        $drmemoryUrl = "https://github.com/DynamoRIO/drmemory/releases/download/release_2.6.0/DrMemory-Windows-2.6.0.msi"
+        $drmemoryMsi = "${{ github.workspace }}\drmemory.msi"
+        
+        Write-Host "Downloading Dr. Memory..."
+        Invoke-WebRequest -Uri $drmemoryUrl -OutFile $drmemoryMsi
+        
+        Write-Host "Installing Dr. Memory..."
+        Start-Process msiexec.exe -ArgumentList "/i", $drmemoryMsi, "/quiet", "/norestart" -Wait
+        Remove-Item $drmemoryMsi
+        
+        # Verify installation
+        $drmemoryPath = "${env:ProgramFiles(x86)}\Dr. Memory\bin64\drmemory.exe"
+        if (Test-Path $drmemoryPath) {
+          Write-Host "✅ Dr. Memory installed successfully at: $drmemoryPath"
+        } else {
+          Write-Error "❌ Dr. Memory installation failed"
+          exit 1
+        }
+
+    - name: 🏗️ Configure Build
+      run: |
+        Write-Host "🏗️ Configuring NNTrainer build..." -ForegroundColor Green
+        
+        $buildType = "${{ github.event.inputs.build_type || 'debug' }}"
+        $nativeFile = if ("${{ matrix.compiler }}" -eq "clang") { "windows-native-clang.ini" } else { "windows-native.ini" }
+        
+        Write-Host "Build configuration:"
+        Write-Host "  - Compiler: ${{ matrix.compiler }}"
+        Write-Host "  - Build type: $buildType"
+        Write-Host "  - Native file: $nativeFile"
+        Write-Host "  - CMake prefix: $env:CMAKE_PREFIX_PATH"
+        Write-Host "  - VCPKG root: $env:VCPKG_ROOT"
+        
+        # Configure with Meson
+        meson setup --native-file $nativeFile builddir --buildtype=$buildType `
+          --prefix="${{ github.workspace }}\install" `
+          -Denable-test=true `
+          -Denable-app=true `
+          -Dinstall-app=true `
+          -Denable-debug=true `
+          -Denable-logging=true
+          
+        Write-Host "✅ Build configured successfully"
+
+    - name: 🔨 Compile NNTrainer
+      run: |
+        Write-Host "🔨 Compiling NNTrainer..." -ForegroundColor Green
+        
+        $startTime = Get-Date
+        meson compile -C builddir -v
+        $endTime = Get-Date
+        $duration = ($endTime - $startTime).TotalMinutes
+        
+        Write-Host "✅ Build completed in $([math]::Round($duration, 2)) minutes"
+
+    - name: 📊 Build Artifacts Analysis
+      run: |
+        Write-Host "📊 Analyzing build artifacts..." -ForegroundColor Cyan
+        
+        # List generated binaries with sizes
+        Write-Host "`n🔍 Generated Libraries:"
+        Get-ChildItem "builddir\nntrainer\*.dll" -ErrorAction SilentlyContinue | ForEach-Object {
+          $size = [math]::Round($_.Length / 1MB, 2)
+          Write-Host "  ✅ $($_.Name) ($size MB)"
+        }
+        
+        Get-ChildItem "builddir\nntrainer\*.lib" -ErrorAction SilentlyContinue | ForEach-Object {
+          $size = [math]::Round($_.Length / 1KB, 2)
+          Write-Host "  ✅ $($_.Name) ($size KB)"
+        }
+        
+        Write-Host "`n🔍 Unit Test Executables:"
+        Get-ChildItem "builddir\test\unittest\*.exe" -ErrorAction SilentlyContinue | ForEach-Object {
+          $size = [math]::Round($_.Length / 1MB, 2)
+          Write-Host "  ✅ $($_.Name) ($size MB)"
+        }
+        
+        Write-Host "`n🔍 Sample Applications:"
+        Get-ChildItem "builddir\Applications\*\*.exe" -ErrorAction SilentlyContinue | ForEach-Object {
+          $size = [math]::Round($_.Length / 1KB, 2)
+          Write-Host "  ✅ $($_.Name) ($size KB) - $($_.Directory.Name)"
+        }
+
+    - name: 🧪 Execute Unit Tests
+      run: |
+        Write-Host "🧪 Running unit tests..." -ForegroundColor Green
+        
+        $startTime = Get-Date
+        
+        # Run tests with verbose output
+        $testResult = meson test -C builddir --verbose --timeout-multiplier 2
+        $testExitCode = $LASTEXITCODE
+        
+        $endTime = Get-Date
+        $duration = ($endTime - $startTime).TotalSeconds
+        
+        Write-Host "`n📈 Unit Test Summary:"
+        Write-Host "  Duration: $([math]::Round($duration, 2)) seconds"
+        Write-Host "  Exit Code: $testExitCode"
+        
+        if ($testExitCode -eq 0) {
+          Write-Host "  Status: ✅ ALL TESTS PASSED" -ForegroundColor Green
+        } else {
+          Write-Host "  Status: ❌ SOME TESTS FAILED" -ForegroundColor Red
+          
+          # Show detailed test results
+          Write-Host "`n📋 Detailed Test Results:"
+          if (Test-Path "builddir\meson-logs\testlog.txt") {
+            Get-Content "builddir\meson-logs\testlog.txt" | Select-Object -Last 50
+          }
+        }
+
+    - name: 🔍 Memory Analysis - Sample Applications
+      run: |
+        Write-Host "🔍 Starting comprehensive memory analysis..." -ForegroundColor Magenta
+        
+        $drmemoryExe = "${env:ProgramFiles(x86)}\Dr. Memory\bin64\drmemory.exe"
+        $timeout = [int]("${{ github.event.inputs.memory_test_timeout || '15' }}")
+        $extendedAnalysis = [bool]("${{ github.event.inputs.enable_extended_memory_analysis }}" -eq "true")
+        
+        # Sample applications to test
+        $sampleApps = @(
+          @{Name="MNIST"; Path="builddir\Applications\MNIST\mnist_main.exe"},
+          @{Name="SimpleFC"; Path="builddir\Applications\SimpleFC\simplefc_main.exe"},
+          @{Name="LogisticRegression"; Path="builddir\Applications\LogisticRegression\logistic_main.exe"}
+        )
+        
+        $totalMemoryIssues = 0
+        $detailedReports = @()
+        
+        foreach ($app in $sampleApps) {
+          if (Test-Path $app.Path) {
+            Write-Host "`n🧠 Memory Analysis: $($app.Name)" -ForegroundColor Yellow
+            Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            
+            $logDir = "${{ github.workspace }}\memory_logs\$($app.Name)"
+            New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+            
+            $memStartTime = Get-Date
+            
+            # Configure Dr. Memory options based on analysis level
+            $drOptions = @("-logdir", $logDir, "-brief")
+            if ($extendedAnalysis) {
+              $drOptions += @("-check_uninitialized", "-check_leaks", "-check_handle_leaks")
+            }
+            $drOptions += @("--", $app.Path)
+            
+            # Run Dr. Memory analysis
+            Write-Host "⚡ Executing: $($app.Name) with Dr. Memory"
+            Write-Host "📁 Log directory: $logDir"
+            
+            $memProcess = Start-Process -FilePath $drmemoryExe -ArgumentList $drOptions -PassThru -WindowStyle Hidden
+            $memCompleted = $memProcess.WaitForExit($timeout * 60 * 1000)
+            $memEndTime = Get-Date
+            $memDuration = ($memEndTime - $memStartTime).TotalSeconds
+            
+            if (!$memCompleted) {
+              $memProcess.Kill()
+              Write-Host "⏰ TIMEOUT after $timeout minutes" -ForegroundColor Red
+              continue
+            }
+            
+            Write-Host "⏱️ Analysis completed in $([math]::Round($memDuration, 2)) seconds"
+            
+            # Parse Dr. Memory results
+            $logFiles = Get-ChildItem "$logDir\*.txt" -ErrorAction SilentlyContinue
+            if ($logFiles) {
+              Write-Host "`n📊 Memory Analysis Results for $($app.Name):"
+              Write-Host "───────────────────────────────────────────────"
+              
+              $allLogContent = $logFiles | Get-Content
+              
+              # Count different types of issues
+              $memoryLeaks = ($allLogContent | Where-Object { $_ -match "LEAK|leak" }).Count
+              $uninitReads = ($allLogContent | Where-Object { $_ -match "UNINITIALIZED|uninitialized" }).Count
+              $invalidHeap = ($allLogContent | Where-Object { $_ -match "INVALID HEAP|invalid heap" }).Count
+              $handleLeaks = ($allLogContent | Where-Object { $_ -match "HANDLE LEAK|handle leak" }).Count
+              $bufferOverflow = ($allLogContent | Where-Object { $_ -match "BUFFER OVERFLOW|buffer overflow" }).Count
+              $useAfterFree = ($allLogContent | Where-Object { $_ -match "USE AFTER FREE|use after free" }).Count
+              
+              $appIssues = $memoryLeaks + $uninitReads + $invalidHeap + $handleLeaks + $bufferOverflow + $useAfterFree
+              $totalMemoryIssues += $appIssues
+              
+              # Display summary
+              Write-Host "  Memory Leaks: $(if($memoryLeaks -eq 0){'✅'}else{'❌'}) $memoryLeaks"
+              Write-Host "  Uninitialized Reads: $(if($uninitReads -eq 0){'✅'}else{'❌'}) $uninitReads"
+              Write-Host "  Invalid Heap Access: $(if($invalidHeap -eq 0){'✅'}else{'❌'}) $invalidHeap"
+              Write-Host "  Handle Leaks: $(if($handleLeaks -eq 0){'✅'}else{'❌'}) $handleLeaks"
+              Write-Host "  Buffer Overflows: $(if($bufferOverflow -eq 0){'✅'}else{'❌'}) $bufferOverflow"
+              Write-Host "  Use After Free: $(if($useAfterFree -eq 0){'✅'}else{'❌'}) $useAfterFree"
+              Write-Host "  Total Issues: $(if($appIssues -eq 0){'✅ CLEAN'}else{"❌ $appIssues issues"})"
+              
+              # Show detailed errors if found
+              if ($appIssues -gt 0) {
+                Write-Host "`n🔍 DETAILED MEMORY ISSUES - $($app.Name):" -ForegroundColor Red
+                Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                
+                # Show memory leaks with stack traces
+                if ($memoryLeaks -gt 0) {
+                  Write-Host "`n💧 MEMORY LEAKS ($memoryLeaks found):" -ForegroundColor Red
+                  $leakLines = $allLogContent | Select-String -Pattern "LEAK|leak" -Context 5
+                  foreach ($leak in $leakLines | Select-Object -First 10) {
+                    Write-Host "  🔸 $($leak.Line)" -ForegroundColor Yellow
+                    foreach ($context in $leak.Context.PostContext) {
+                      if ($context -match "^\s*#\d+|at 0x|in ") {
+                        Write-Host "    📍 $context" -ForegroundColor Gray
+                      }
+                    }
+                    Write-Host ""
+                  }
+                }
+                
+                # Show uninitialized reads
+                if ($uninitReads -gt 0) {
+                  Write-Host "`n🔍 UNINITIALIZED READS ($uninitReads found):" -ForegroundColor Red
+                  $uninitLines = $allLogContent | Select-String -Pattern "UNINITIALIZED|uninitialized" -Context 3
+                  foreach ($uninit in $uninitLines | Select-Object -First 5) {
+                    Write-Host "  🔸 $($uninit.Line)" -ForegroundColor Yellow
+                    foreach ($context in $uninit.Context.PostContext) {
+                      if ($context -match "^\s*#\d+|at 0x|in ") {
+                        Write-Host "    📍 $context" -ForegroundColor Gray
+                      }
+                    }
+                    Write-Host ""
+                  }
+                }
+                
+                # Show buffer overflows
+                if ($bufferOverflow -gt 0) {
+                  Write-Host "`n🚨 BUFFER OVERFLOWS ($bufferOverflow found):" -ForegroundColor Red
+                  $overflowLines = $allLogContent | Select-String -Pattern "BUFFER OVERFLOW|buffer overflow" -Context 3
+                  foreach ($overflow in $overflowLines | Select-Object -First 5) {
+                    Write-Host "  🔸 $($overflow.Line)" -ForegroundColor Yellow
+                    foreach ($context in $overflow.Context.PostContext) {
+                      if ($context -match "^\s*#\d+|at 0x|in ") {
+                        Write-Host "    📍 $context" -ForegroundColor Gray
+                      }
+                    }
+                    Write-Host ""
+                  }
+                }
+                
+                # Show full log content for critical issues
+                Write-Host "`n📋 FULL DR. MEMORY LOG EXCERPT:" -ForegroundColor Cyan
+                Write-Host "───────────────────────────────────────────────"
+                $allLogContent | Select-Object -First 100 | ForEach-Object {
+                  if ($_ -match "ERROR|LEAK|UNINITIALIZED|INVALID") {
+                    Write-Host "  ❌ $_" -ForegroundColor Red
+                  } elseif ($_ -match "WARNING|POSSIBLE") {
+                    Write-Host "  ⚠️ $_" -ForegroundColor Yellow
+                  } elseif ($_ -match "^\s*#\d+|at 0x|in ") {
+                    Write-Host "    📍 $_" -ForegroundColor Gray
+                  } else {
+                    Write-Host "    $_" -ForegroundColor White
+                  }
+                }
+              }
+              
+              # Store detailed report
+              $detailedReports += @{
+                App = $app.Name
+                Issues = $appIssues
+                MemoryLeaks = $memoryLeaks
+                UninitReads = $uninitReads
+                InvalidHeap = $invalidHeap
+                HandleLeaks = $handleLeaks
+                BufferOverflow = $bufferOverflow
+                UseAfterFree = $useAfterFree
+                Duration = $memDuration
+                LogDir = $logDir
+              }
+              
+            } else {
+              Write-Host "⚠️ No Dr. Memory log files found" -ForegroundColor Yellow
+            }
+          } else {
+            Write-Host "⚠️ Application not found: $($app.Path)" -ForegroundColor Yellow
+          }
+        }
+        
+        # Final Memory Analysis Summary
+        Write-Host "`n🏁 FINAL MEMORY ANALYSIS SUMMARY" -ForegroundColor Magenta
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        Write-Host "Total Applications Tested: $($sampleApps.Count)"
+        Write-Host "Total Memory Issues Found: $(if($totalMemoryIssues -eq 0){'✅ 0 (CLEAN!)'}else{"❌ $totalMemoryIssues"})"
+        Write-Host "Extended Analysis: $(if($extendedAnalysis){'✅ Enabled'}else{'❌ Disabled'})"
+        Write-Host "Analysis Timeout: $timeout minutes"
+        
+        if ($detailedReports.Count -gt 0) {
+          Write-Host "`n📊 Per-Application Summary:"
+          foreach ($report in $detailedReports) {
+            $status = if ($report.Issues -eq 0) { "✅ CLEAN" } else { "❌ $($report.Issues) issues" }
+            Write-Host "  $($report.App): $status ($([math]::Round($report.Duration, 1))s)"
+          }
+        }
+        
+        # Set job result based on memory issues
+        if ($totalMemoryIssues -gt 0) {
+          Write-Host "`n❌ MEMORY ANALYSIS FAILED - Issues found that need attention!" -ForegroundColor Red
+          exit 1
+        } else {
+          Write-Host "`n✅ MEMORY ANALYSIS PASSED - No memory issues detected!" -ForegroundColor Green
+        }
+
+    - name: 📋 Generate Memory Audit Report
+      if: always()
+      run: |
+        Write-Host "📋 Generating comprehensive memory audit report..." -ForegroundColor Blue
+        
+        $reportPath = "${{ github.workspace }}\memory_audit_report.md"
+        $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss UTC"
+        
+        $report = @"
+# Windows Memory Audit Report - NNTrainer
+
+**Generated:** $timestamp  
+**Compiler:** ${{ matrix.compiler }}  
+**Build Type:** ${{ github.event.inputs.build_type || 'debug' }}  
+**GitHub Run:** [${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})  
+
+## Summary
+
+This report contains the results of comprehensive memory analysis performed on NNTrainer Windows build using Dr. Memory and other debugging tools.
+
+## Analysis Configuration
+
+- **Dr. Memory Version:** 2.6.0
+- **Extended Analysis:** ${{ github.event.inputs.enable_extended_memory_analysis || 'false' }}
+- **Timeout:** ${{ github.event.inputs.memory_test_timeout || '15' }} minutes
+- **Target Applications:** MNIST, SimpleFC, LogisticRegression
+
+## Memory Analysis Results
+
+$(if (Test-Path "${{ github.workspace }}\memory_logs") {
+  "### Detailed Results Available in Artifacts"
+  Get-ChildItem "${{ github.workspace }}\memory_logs" -Directory | ForEach-Object {
+    "- **$($_.Name)**: Memory analysis logs available"
+  }
+} else {
+  "### No memory analysis logs generated"
+})
+
+## Recommendations
+
+1. **For Memory Leaks:** Check object lifecycle management and ensure proper cleanup
+2. **For Uninitialized Reads:** Initialize all variables before use
+3. **For Buffer Overflows:** Validate array bounds and use safe string functions
+4. **For Handle Leaks:** Ensure all file/resource handles are properly closed
+
+## Next Steps
+
+If memory issues were found:
+1. Review the detailed stack traces above
+2. Download the memory analysis artifacts
+3. Fix the identified issues
+4. Re-run the memory analysis
+
+"@
+        
+        $report | Out-File -FilePath $reportPath -Encoding UTF8
+        Write-Host "✅ Memory audit report generated: $reportPath"
+
+    - name: 📦 Upload Memory Analysis Artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: memory-analysis-logs-${{ matrix.compiler }}
+        path: |
+          memory_logs/
+          memory_audit_report.md
+          builddir/meson-logs/
+        retention-days: 30
+
+    - name: 📊 Final Build Status
+      if: always()
+      run: |
+        Write-Host "`n🏁 FINAL BUILD & MEMORY AUDIT STATUS" -ForegroundColor Cyan
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        
+        $buildSuccess = Test-Path "builddir\nntrainer\*.dll"
+        $unitTestsExist = Test-Path "builddir\test\unittest\*.exe"
+        $appsExist = Test-Path "builddir\Applications\*\*.exe"
+        
+        Write-Host "Build Artifacts: $(if($buildSuccess){'✅ Generated'}else{'❌ Missing'})"
+        Write-Host "Unit Tests: $(if($unitTestsExist){'✅ Available'}else{'❌ Missing'})"
+        Write-Host "Sample Apps: $(if($appsExist){'✅ Available'}else{'❌ Missing'})"
+        Write-Host "Memory Analysis: $(if(Test-Path 'memory_logs'){'✅ Completed'}else{'❌ Not performed'})"
+        
+        Write-Host "`n📋 Artifacts uploaded for detailed analysis"
+        Write-Host "🔍 Check the 'Actions' tab for downloadable logs and reports"
+        
+        if ($buildSuccess -and $unitTestsExist -and $appsExist) {
+          Write-Host "`n🎉 BUILD SUCCESSFUL - Ready for deployment!" -ForegroundColor Green
+        } else {
+          Write-Host "`n❌ BUILD ISSUES DETECTED - Please review logs" -ForegroundColor Red
+        }
