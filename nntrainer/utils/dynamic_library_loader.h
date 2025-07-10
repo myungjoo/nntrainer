@@ -69,7 +69,7 @@ public:
 
   static void *loadSymbol(void *handle, const char *symbol_name) {
 #if defined(_WIN32)
-    return GetProcAddress((HMODULE)handle, symbol_name);
+    return reinterpret_cast<void*>(GetProcAddress((HMODULE)handle, symbol_name));
 #else
     return dlsym(handle, symbol_name);
 #endif

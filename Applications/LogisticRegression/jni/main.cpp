@@ -26,6 +26,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <ctime>
 #include <fstream>
 #include <iostream>
 #include <layer.h>

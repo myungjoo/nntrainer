@@ -22,8 +22,8 @@
 #include <swap_device.h>
 
 #if defined(_WIN32)
-#include <Memoryapi.h>
-#include <Sysinfoapi.h>
+#include <memoryapi.h>
+#include <sysinfoapi.h>
 #endif
 
 namespace nntrainer {
