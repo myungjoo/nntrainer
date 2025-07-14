@@ -1,0 +1,148 @@
+@startuml NNtrainer_Package_Dependencies
+!theme aws-orange
+title NNtrainer Package Dependencies and Module Organization
+
+package "Applications" as ApplicationsPackage {
+  package "Examples" {
+    package "MNIST" as MNISTApp
+    package "ResNet" as ResNetApp  
+    package "VGG" as VGGApp
+    package "YOLO" as YOLOApp
+    package "LLaMA" as LLaMAApp
+    package "Custom" as CustomApp
+  }
+  
+  package "Platform Specific" {
+    package "Android" as AndroidApp
+    package "Tizen_native" as TizenApp
+  }
+}
+
+package "API" as APIPackage {
+  package "capi" as CAPIPackage {
+    package "include" as CAPIInclude
+    package "src" as CAPISrc
+    package "doc" as CAPIDoc
+  }
+  
+  package "ccapi" as CCAPIPackage
+  package "JNI" as JNIPackage
+}
+
+package "nntrainer" as NNTrainerPackage {
+  
+  package "models" as ModelsPackage {
+    note right : Neural Network Model\nManagement and Execution
+  }
+  
+  package "graph" as GraphPackage {
+    note right : Computational Graph\nConstruction and Optimization
+  }
+  
+  package "layers" as LayersPackage {
+    package "loss" as LossPackage
+    package "cl_layers" as CLLayersPackage
+    note right : Neural Network Layer\nImplementations
+  }
+  
+  package "optimizers" as OptimizersPackage {
+    note right : Training Optimization\nAlgorithms
+  }
+  
+  package "tensor" as TensorPackage {
+    package "cpu_backend" as CPUBackendPackage
+    package "cl_operations" as CLOpsPackage
+    note right : High-Performance\nTensor Operations
+  }
+  
+  package "dataset" as DatasetPackage {
+    note right : Data Loading and\nPreprocessing Pipeline
+  }
+  
+  package "utils" as UtilsPackage {
+    note right : Utility Functions\nand Helpers
+  }
+  
+  package "opencl" as OpenCLPackage {
+    note right : GPU Acceleration\nSupport
+  }
+  
+  package "compiler" as CompilerPackage {
+    note right : Model Compilation\nand Optimization
+  }
+}
+
+package "nnstreamer" as NNStreamerPackage {
+  package "tensor_filter" as TensorFilterPackage
+  package "tensor_trainer" as TensorTrainerPackage
+}
+
+package "tools" as ToolsPackage {
+  package "pyutils" as PyUtilsPackage
+}
+
+package "test" as TestPackage {
+  note right : Unit Tests and\nIntegration Tests
+}
+
+package "docs" as DocsPackage {
+  note right : Documentation\nand Examples
+}
+
+package "jni" as JNIBuildPackage {
+  note right : JNI Build Scripts\nand Configuration
+}
+
+' API Dependencies
+ApplicationsPackage --> CAPIPackage : uses
+ApplicationsPackage --> CCAPIPackage : uses
+AndroidApp --> JNIPackage : uses
+
+CAPIPackage --> NNTrainerPackage : wraps
+CCAPIPackage --> NNTrainerPackage : wraps
+JNIPackage --> NNTrainerPackage : wraps
+
+' Core module dependencies
+ModelsPackage --> GraphPackage : uses
+ModelsPackage --> LayersPackage : contains
+ModelsPackage --> OptimizersPackage : applies
+ModelsPackage --> DatasetPackage : feeds from
+
+GraphPackage --> LayersPackage : instantiates
+GraphPackage --> TensorPackage : operates on
+
+LayersPackage --> TensorPackage : computes with
+LayersPackage --> LossPackage : includes
+LayersPackage --> CLLayersPackage : accelerates with
+
+OptimizersPackage --> TensorPackage : updates
+OptimizersPackage --> LayersPackage : optimizes
+
+TensorPackage --> CPUBackendPackage : executes on
+TensorPackage --> CLOpsPackage : accelerates with
+TensorPackage --> OpenCLPackage : uses
+
+DatasetPackage --> TensorPackage : produces
+DatasetPackage --> UtilsPackage : uses
+
+CompilerPackage --> GraphPackage : optimizes
+CompilerPackage --> LayersPackage : analyzes
+
+' External integrations
+TensorFilterPackage --> LayersPackage : integrates
+TensorTrainerPackage --> ModelsPackage : extends
+
+' Development and testing
+TestPackage --> NNTrainerPackage : tests
+ToolsPackage --> NNTrainerPackage : supports
+PyUtilsPackage --> NNTrainerPackage : utilities
+
+' Build system
+JNIBuildPackage --> JNIPackage : builds
+JNIBuildPackage --> NNTrainerPackage : compiles
+
+' Documentation
+DocsPackage --> ApplicationsPackage : documents
+DocsPackage --> APIPackage : describes
+
+@enduml

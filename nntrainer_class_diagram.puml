@@ -1,0 +1,204 @@
+@startuml NNtrainer_Class_Diagram
+!theme aws-orange
+title NNtrainer Core Classes and Interfaces
+
+abstract class LayerBase {
+  # std::string name
+  # std::vector<Weight> weights
+  # LayerContext context
+  + virtual ~LayerBase()
+  + virtual void forward(Tensor& input, Tensor& output) = 0
+  + virtual void backward(Tensor& grad_input, Tensor& grad_output) = 0
+  + virtual void setProperty(const PropertyType& property) = 0
+  + virtual Tensor& getWeight(unsigned int idx) = 0
+  + virtual void initialize() = 0
+}
+
+interface LayerDevel {
+  + void finalize()
+  + void setProperty(const std::vector<std::string>& properties)
+  + std::vector<Tensor> getInputTensors()
+  + std::vector<Tensor> getOutputTensors()
+}
+
+class LayerContext {
+  - std::vector<TensorSpec> input_specs
+  - std::vector<TensorSpec> output_specs
+  - RunLayerContext run_context
+  + void setInputSpecs(const std::vector<TensorSpec>& specs)
+  + void setOutputSpecs(const std::vector<TensorSpec>& specs)
+  + Tensor& getInput(unsigned int idx)
+  + Tensor& getOutput(unsigned int idx)
+}
+
+class LayerNode {
+  - std::unique_ptr<LayerBase> layer
+  - std::string layer_name
+  - std::string layer_type
+  + void forward()
+  + void backward()
+  + LayerBase* getLayer()
+  + void setProperty(const std::string& property)
+}
+
+class Conv2DLayer {
+  - unsigned int filter_size[2]
+  - unsigned int kernel_size[2]
+  - unsigned int stride[2]
+  - unsigned int padding[2]
+  + void forward(Tensor& input, Tensor& output) override
+  + void backward(Tensor& grad_input, Tensor& grad_output) override
+  + void setProperty(const PropertyType& property) override
+  + void initialize() override
+}
+
+class FullyConnectedLayer {
+  - unsigned int unit
+  - bool bias_enable
+  + void forward(Tensor& input, Tensor& output) override
+  + void backward(Tensor& grad_input, Tensor& grad_output) override
+  + void setProperty(const PropertyType& property) override
+  + void initialize() override
+}
+
+class LSTMLayer {
+  - unsigned int unit
+  - bool return_sequences
+  - bool dropout_enable
+  - float dropout_rate
+  + void forward(Tensor& input, Tensor& output) override
+  + void backward(Tensor& grad_input, Tensor& grad_output) override
+  + void setProperty(const PropertyType& property) override
+  + void initialize() override
+}
+
+abstract class TensorBase {
+  # TensorDim dim
+  # void* data
+  # TensorFormat format
+  + virtual ~TensorBase()
+  + virtual void allocate() = 0
+  + virtual void deallocate() = 0
+  + virtual float getValue(unsigned int idx) const = 0
+  + virtual void setValue(unsigned int idx, float value) = 0
+  + virtual TensorBase& add(const TensorBase& other) = 0
+  + virtual TensorBase& multiply(const TensorBase& other) = 0
+}
+
+class FloatTensor {
+  + void allocate() override
+  + void deallocate() override
+  + float getValue(unsigned int idx) const override
+  + void setValue(unsigned int idx, float value) override
+  + TensorBase& add(const TensorBase& other) override
+  + TensorBase& multiply(const TensorBase& other) override
+}
+
+class HalfTensor {
+  + void allocate() override
+  + void deallocate() override
+  + float getValue(unsigned int idx) const override
+  + void setValue(unsigned int idx, float value) override
+  + TensorBase& add(const TensorBase& other) override
+  + TensorBase& multiply(const TensorBase& other) override
+}
+
+class Tensor {
+  - std::shared_ptr<TensorBase> tensor_impl
+  - TensorDim tensor_dim
+  + Tensor(const TensorDim& dim, TensorFormat format)
+  + float getValue(unsigned int idx) const
+  + void setValue(unsigned int idx, float value)
+  + Tensor add(const Tensor& other)
+  + Tensor multiply(const Tensor& other)
+  + void reshape(const TensorDim& new_dim)
+}
+
+class Weight {
+  - Tensor weight_tensor
+  - Tensor gradient_tensor
+  - bool trainable
+  - std::string name
+  + Weight(const TensorDim& dim, const std::string& name)
+  + Tensor& getWeight()
+  + Tensor& getGradient()
+  + void updateWeight(const Tensor& delta)
+  + void setTrainable(bool trainable)
+}
+
+abstract class OptimizerBase {
+  # float learning_rate
+  # std::shared_ptr<LearningRateScheduler> lr_scheduler
+  + virtual ~OptimizerBase()
+  + virtual void applyGradient(Weight& weight) = 0
+  + virtual void setProperty(const PropertyType& property) = 0
+  + virtual void initialize() = 0
+}
+
+class AdamOptimizer {
+  - float beta1
+  - float beta2
+  - float epsilon
+  - std::unordered_map<std::string, Tensor> moment1
+  - std::unordered_map<std::string, Tensor> moment2
+  + void applyGradient(Weight& weight) override
+  + void setProperty(const PropertyType& property) override
+  + void initialize() override
+}
+
+class SGDOptimizer {
+  - float momentum
+  - std::unordered_map<std::string, Tensor> velocity
+  + void applyGradient(Weight& weight) override
+  + void setProperty(const PropertyType& property) override
+  + void initialize() override
+}
+
+class NeuralNetwork {
+  - std::vector<std::shared_ptr<LayerNode>> layers
+  - std::shared_ptr<OptimizerBase> optimizer
+  - NetworkGraph graph
+  + void addLayer(std::shared_ptr<LayerBase> layer)
+  + void setOptimizer(std::shared_ptr<OptimizerBase> opt)
+  + void compile()
+  + void train(const Tensor& input, const Tensor& label)
+  + Tensor inference(const Tensor& input)
+}
+
+class NetworkGraph {
+  - std::vector<std::shared_ptr<LayerNode>> nodes
+  - std::vector<Connection> connections
+  + void addNode(std::shared_ptr<LayerNode> node)
+  + void addConnection(const Connection& conn)
+  + void topologicalSort()
+  + void forward()
+  + void backward()
+}
+
+' Inheritance relationships
+LayerBase <|-- Conv2DLayer
+LayerBase <|-- FullyConnectedLayer
+LayerBase <|-- LSTMLayer
+LayerDevel <|.. LayerBase
+TensorBase <|-- FloatTensor
+TensorBase <|-- HalfTensor
+OptimizerBase <|-- AdamOptimizer
+OptimizerBase <|-- SGDOptimizer
+
+' Composition relationships
+LayerBase *-- LayerContext : contains
+LayerBase *-- Weight : manages
+LayerNode *-- LayerBase : contains
+Tensor *-- TensorBase : implements
+Weight *-- Tensor : contains
+NeuralNetwork *-- LayerNode : contains
+NeuralNetwork *-- OptimizerBase : uses
+NeuralNetwork *-- NetworkGraph : manages
+NetworkGraph *-- LayerNode : orchestrates
+
+' Dependencies
+OptimizerBase ..> Weight : updates
+LayerBase ..> Tensor : processes
+NetworkGraph ..> LayerNode : executes
+
+@enduml
