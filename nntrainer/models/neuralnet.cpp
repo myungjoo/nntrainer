@@ -30,6 +30,10 @@
 #include <future>
 #include <iomanip>
 #include <sstream>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #include <activation_realizer.h>
 #include <common_properties.h>
@@ -612,17 +616,43 @@ void NeuralNetwork::save(const std::string &file_path,
   case ml::train::ModelFormat::MODEL_FORMAT_BIN: {
     auto model_file = checkedOpenStream<std::ofstream>(
       file_path, std::ios::out | std::ios::binary | std::ios::trunc);
+    
+    // Set larger buffer size for better I/O performance on UFS drives
+    constexpr size_t BUFFER_SIZE = 1024 * 1024; // 1MB buffer
+    std::vector<char> write_buffer(BUFFER_SIZE);
+    model_file.rdbuf()->pubsetbuf(write_buffer.data(), BUFFER_SIZE);
 
+    // Batch layer saves for better cache locality
+    std::vector<std::vector<char>> layer_data;
+    layer_data.reserve(model_graph.size());
+    
     for (auto iter = model_graph.cbegin(); iter != model_graph.cend(); iter++) {
-      (*iter)->save(model_file, false, exec_mode);
+      std::stringstream temp_stream;
+      (*iter)->save(temp_stream, false, exec_mode);
+      std::string temp_str = temp_stream.str();
+      layer_data.emplace_back(temp_str.begin(), temp_str.end());
+    }
+    
+    // Write all layer data in one sequential operation
+    for (const auto& data : layer_data) {
+      model_file.write(data.data(), data.size());
     }
 
     if (opt && istrequal(opt->getType(), "adam")) {
       std::string adam = "adam";
       model_file.write(adam.c_str(), 4);
-      for (auto iter = model_graph.cbegin(); iter != model_graph.cend();
-           iter++) {
-        (*iter)->save(model_file, true);
+      
+      // Batch optimizer data writes
+      layer_data.clear();
+      for (auto iter = model_graph.cbegin(); iter != model_graph.cend(); iter++) {
+        std::stringstream temp_stream;
+        (*iter)->save(temp_stream, true);
+        std::string temp_str = temp_stream.str();
+        layer_data.emplace_back(temp_str.begin(), temp_str.end());
+      }
+      
+      for (const auto& data : layer_data) {
+        model_file.write(data.data(), data.size());
       }
     }
 
@@ -704,27 +734,74 @@ void NeuralNetwork::load(const std::string &file_path,
       << "Cannot load if not initialized yet, path: " << file_path
       << " format: " << static_cast<unsigned>(format);
 
-    auto model_file = checkedOpenStream<std::ifstream>(
-      (v.size() == 2) ? v[1] : v[0], std::ios::in | std::ios::binary);
+    const std::string &model_file_path = (v.size() == 2) ? v[1] : v[0];
 
-    if (exec_mode == ml::train::ExecutionMode::INFERENCE) {
-      std::vector<std::future<void>> futures;
-      for (auto iter = model_graph.cbegin(); iter != model_graph.cend();
-           ++iter) {
-        auto exec_order = std::get<0>((*iter)->getExecutionOrder());
-        futures.emplace_back(std::async(std::launch::async, [=, this]() {
-          auto local_model_file = checkedOpenStream<std::ifstream>(
-            (v.size() == 2) ? v[1] : v[0], std::ios::in | std::ios::binary);
-          (*iter)->read(local_model_file, false, exec_mode, fsu_mode,
-                        std::numeric_limits<size_t>::max(), true);
-        }));
+    if (exec_mode == ml::train::ExecutionMode::INFERENCE && !fsu_mode) {
+      // Use memory mapping for better I/O performance on UFS drives
+      int fd = open(model_file_path.c_str(), O_RDONLY);
+      if (fd == -1) {
+        throw std::runtime_error("Failed to open model file: " + model_file_path);
       }
-      for (auto &f : futures)
-        f.get();
+
+      struct stat file_stat;
+      if (fstat(fd, &file_stat) == -1) {
+        close(fd);
+        throw std::runtime_error("Failed to get file size: " + model_file_path);
+      }
+
+      void* mapped_data = mmap(nullptr, file_stat.st_size, PROT_READ, 
+                               MAP_PRIVATE | MAP_POPULATE, fd, 0);
+      if (mapped_data == MAP_FAILED) {
+        close(fd);
+        // Fallback to regular file I/O if mmap fails
+        auto model_file = checkedOpenStream<std::ifstream>(
+          model_file_path, std::ios::in | std::ios::binary);
+        
+        std::vector<std::future<void>> futures;
+        for (auto iter = model_graph.cbegin(); iter != model_graph.cend(); ++iter) {
+          futures.emplace_back(std::async(std::launch::async, [=, this]() {
+            auto local_model_file = checkedOpenStream<std::ifstream>(
+              model_file_path, std::ios::in | std::ios::binary);
+            (*iter)->read(local_model_file, false, exec_mode, fsu_mode,
+                          std::numeric_limits<size_t>::max(), true);
+          }));
+        }
+        for (auto &f : futures) f.get();
+      } else {
+        // Memory-mapped I/O with parallel processing
+        const char* data_ptr = static_cast<const char*>(mapped_data);
+        std::vector<std::future<void>> futures;
+        
+        for (auto iter = model_graph.cbegin(); iter != model_graph.cend(); ++iter) {
+          futures.emplace_back(std::async(std::launch::async, [=, this]() {
+            (*iter)->readFromMemory(data_ptr, file_stat.st_size, false, exec_mode, fsu_mode);
+          }));
+        }
+        for (auto &f : futures) f.get();
+        
+        munmap(mapped_data, file_stat.st_size);
+      }
+      close(fd);
     } else {
-      for (auto iter = model_graph.cbegin(); iter != model_graph.cend();
-           ++iter) {
-        (*iter)->read(model_file, false, exec_mode, fsu_mode);
+      auto model_file = checkedOpenStream<std::ifstream>(
+        model_file_path, std::ios::in | std::ios::binary);
+      
+      if (exec_mode == ml::train::ExecutionMode::INFERENCE && fsu_mode) {
+        // FSU mode with async loading optimization
+        std::vector<std::future<void>> futures;
+        for (auto iter = model_graph.cbegin(); iter != model_graph.cend(); ++iter) {
+          futures.emplace_back(std::async(std::launch::async, [=, this]() {
+            auto local_model_file = checkedOpenStream<std::ifstream>(
+              model_file_path, std::ios::in | std::ios::binary);
+            (*iter)->read(local_model_file, false, exec_mode, fsu_mode,
+                          std::numeric_limits<size_t>::max(), true);
+          }));
+        }
+        for (auto &f : futures) f.get();
+      } else {
+        for (auto iter = model_graph.cbegin(); iter != model_graph.cend(); ++iter) {
+          (*iter)->read(model_file, false, exec_mode, fsu_mode);
+        }
       }
     }
     try {
@@ -1252,8 +1329,8 @@ int NeuralNetwork::train_run(
       forwarding(true, stop_cb, stop_user_data);
       backwarding(iter++, stop_cb, stop_user_data);
 
-      // To avoid unconsidered memory leak, we need to clear the cache
-      model_graph.flushCache();
+      // Optimized cache management to reduce memory copy overhead
+      model_graph.flushCacheOptimized();
 
       if (!stop_cb(stop_user_data)) {
         std::cout << "#" << epoch_idx << "/" << getEpochs();
