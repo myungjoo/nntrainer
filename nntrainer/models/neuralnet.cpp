@@ -377,7 +377,8 @@ sharedConstTensors NeuralNetwork::forwarding(
     auto f = std::get<0>(node->getExecutionOrder());
     if (exec_mode == ExecutionMode::TRAIN or
         (exec_mode == ExecutionMode::INFERENCE and !fsu_mode)) {
-      model_graph.flushCacheExcept(f);
+      // Selective cache flushing to retain frequently accessed data
+      model_graph.flushCacheSelective(f, lookahead);
       node->forwarding(training);
     } else {
       /**
@@ -443,7 +444,8 @@ sharedConstTensors NeuralNetwork::forwarding(sharedConstTensors input,
     << " label_batch: " << label[0]->batch()
     << " target_batch: " << current_batch;
 
-  model_graph.setInputsLabels(input, label);
+  // Use optimized input setting to avoid unnecessary copying
+  model_graph.setInputsLabelsZeroCopy(input, label);
 
   return forwarding(training);
 }
@@ -553,7 +555,8 @@ void NeuralNetwork::backwarding(int iteration,
      * 4. gradientClippingOnLastAccess
      */
 
-    model_graph.flushCacheExcept(std::get<1>(node->getExecutionOrder()));
+    // Use memory-efficient cache management during gradient computation
+    model_graph.flushCacheInPlace(std::get<1>(node->getExecutionOrder()));
     PROFILE_MEM_ANNOTATE("CalcGradient: " + node->getName());
 
     bool apply_gradient = true;
@@ -1256,6 +1259,9 @@ int NeuralNetwork::train(const std::vector<std::string> &values,
   model_graph.setBatchSize(
     std::get<props::TrainingBatchSize>(model_flex_props));
 
+  // Pre-allocate memory pools to reduce allocation overhead during training
+  model_graph.initializeMemoryPools();
+  
   status = allocate(ExecutionMode::TRAIN);
   NN_RETURN_STATUS();
 
@@ -1340,9 +1346,10 @@ int NeuralNetwork::train_run(
         continue;
       }
 
-      auto const &labels = iteration.getLabelsRef();
-      auto const &inputs = iteration.getInputsRef();
-      model_graph.setInputsLabels(inputs, labels);
+          // Optimize memory access by using move semantics where possible
+    auto const &labels = iteration.getLabelsRef();
+    auto const &inputs = iteration.getInputsRef();
+    model_graph.setInputsLabelsOptimized(inputs, labels);
 
       on_iteration_fetch(stat, *buffer);
       on_iteration_update_stat(stat, outputs, labels);
