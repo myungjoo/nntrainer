@@ -353,8 +353,19 @@ sharedConstTensors NeuralNetwork::forwarding(
   unsigned int lookahead = std::get<props::FsuLookahead>(model_flex_props);
   bool fsu_mode = std::get<props::Fsu>(model_flex_props);
   if (fsu_mode) {
+    // Optimized tensor loading: use async I/O and batch prefetching
+    std::vector<std::future<void>> load_futures;
+    load_futures.reserve(lookahead);
+    
     for (unsigned int i = 0; i < lookahead; ++i) {
-      model_graph.LoadTensors(i);
+      load_futures.emplace_back(std::async(std::launch::async, [this, i]() {
+        model_graph.LoadTensorsAsync(i);
+      }));
+    }
+    
+    // Wait for initial batch to complete loading
+    for (auto &future : load_futures) {
+      future.wait();
     }
   }
   std::function<void(std::shared_ptr<LayerNode>, bool)> forwarding_op =
@@ -399,7 +410,13 @@ sharedConstTensors NeuralNetwork::forwarding(
       model_graph.checkLoadComplete(f);
       node->forwarding(training);
       model_graph.inActive(f);
-      model_graph.LoadTensors(f + lookahead);
+      
+      // Async tensor loading for next batch to reduce wait time
+      if (f + lookahead < model_graph.getNumLayers()) {
+        std::async(std::launch::deferred, [this, f, lookahead]() {
+          model_graph.LoadTensorsAsync(f + lookahead);
+        });
+      }
     }
   };
 
@@ -439,8 +456,19 @@ sharedConstTensors NeuralNetwork::incremental_forwarding(
   bool fsu_mode = std::get<props::Fsu>(model_flex_props);
 
   if (fsu_mode) {
+    // Optimized tensor loading for incremental forwarding
+    std::vector<std::future<void>> prefetch_futures;
+    prefetch_futures.reserve(lookahead);
+    
     for (unsigned int i = 0; i < lookahead; ++i) {
-      model_graph.LoadTensors(i);
+      prefetch_futures.emplace_back(std::async(std::launch::async, [this, i]() {
+        model_graph.LoadTensorsAsync(i);
+      }));
+    }
+    
+    // Overlap loading with any previous computation
+    for (auto &future : prefetch_futures) {
+      future.wait();
     }
   }
 
@@ -458,7 +486,13 @@ sharedConstTensors NeuralNetwork::incremental_forwarding(
       model_graph.checkLoadComplete(f);
       node->incremental_forwarding(from, to, training);
       model_graph.inActive(f);
-      model_graph.LoadTensors(f + lookahead);
+      
+      // Async prefetch next tensors to hide I/O latency
+      if (f + lookahead < model_graph.getNumLayers()) {
+        std::async(std::launch::deferred, [this, f, lookahead]() {
+          model_graph.LoadTensorsAsync(f + lookahead);
+        });
+      }
     }
   };
 
