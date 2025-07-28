@@ -185,51 +185,111 @@ const std::string &getSgemmClNoTransKernel() {
   static const std::string sgemm_cl_noTrans_kernel_ =
     R"(
     #define TS 16
+    #define TSM 64    // Tile size in M dimension  
+    #define TSN 64    // Tile size in N dimension
+    #define TSK 16    // Tile size in K dimension
+    #define WPTM 4    // Work per thread in M dimension
+    #define WPTN 4    // Work per thread in N dimension
+    #define RTSM (TSM/WPTM) // Reduced tile size in M
+    #define RTSN (TSN/WPTN) // Reduced tile size in N
+    
     __kernel void sgemm_cl_noTrans(__global const float *A, __global const float *B,
                                    __global float *C, const int M, const int N,
                                    const int K) {
-      const int globalRow = get_global_id(1); // M dimension
-      const int globalCol = get_global_id(0); // N dimension
+      
+      // Thread identifiers
+      const int tidm = get_local_id(1); // Local row ID (max: TSM/WPTM)
+      const int tidn = get_local_id(0); // Local col ID (max: TSN/WPTN)
+      const int offsetM = TSM * get_group_id(1); // Work-group offset
+      const int offsetN = TSN * get_group_id(0); // Work-group offset
 
-      __local float Asub[TS][TS];
-      __local float Bsub[TS][TS];
+      // Local memory for tiling
+      __local float Asub[TSK][TSM + 2]; // +2 for bank conflict avoidance
+      __local float Bsub[TSK][TSN + 2];
 
-      float sum = 0.0f;
+      // Allocate register space for results
+      float Creg[WPTM][WPTN];
+      float Areg[WPTM];
+      float Breg[WPTN];
 
-      const int localRow = get_local_id(1);
-      const int localCol = get_local_id(0);
-      const int groupRow = TS * get_group_id(1);
-      const int groupCol = TS * get_group_id(0);
+      // Initialize the accumulation registers
+      for (int wm = 0; wm < WPTM; wm++) {
+        for (int wn = 0; wn < WPTN; wn++) {
+          Creg[wm][wn] = 0.0f;
+        }
+      }
 
-      for (int t = 0; t < (K + TS - 1) / TS; ++t) {
-        const int tiledRowA = groupRow + localRow;
-        const int tiledColA = t * TS + localCol;
+      // Loop over all tiles
+      int numTiles = (K + TSK - 1) / TSK;
+      for (int t = 0; t < numTiles; t++) {
 
-        const int tiledRowB = t * TS + localRow;
-        const int tiledColB = groupCol + localCol;
+        // Load one tile of A and B into local memory
+        for (int la = 0; la < TSK; la += RTSM) {
+          for (int lb = 0; lb < TSM; lb += RTSN) {
+            int tiledIndex = la + tidm;
+            int globalRowA = offsetM + lb + tidn;
+            int globalColA = t * TSK + tiledIndex;
+            
+            if (globalRowA < M && globalColA < K) {
+              Asub[tiledIndex][lb + tidn] = A[globalRowA * K + globalColA];
+            } else {
+              Asub[tiledIndex][lb + tidn] = 0.0f;
+            }
+          }
+        }
+        
+        for (int la = 0; la < TSK; la += RTSM) {
+          for (int lb = 0; lb < TSN; lb += RTSN) {
+            int tiledIndex = la + tidm;
+            int globalRowB = t * TSK + tiledIndex;
+            int globalColB = offsetN + lb + tidn;
+            
+            if (globalRowB < K && globalColB < N) {
+              Bsub[tiledIndex][lb + tidn] = B[globalRowB * N + globalColB];
+            } else {
+              Bsub[tiledIndex][lb + tidn] = 0.0f;
+            }
+          }
+        }
 
-        // Load A
-        if (tiledRowA < M && tiledColA < K)
-          Asub[localRow][localCol] = A[tiledRowA * K + tiledColA];
-        else
-          Asub[localRow][localCol] = 0.0f;
-
-        // Load B
-        if (tiledRowB < K && tiledColB < N)
-          Bsub[localRow][localCol] = B[tiledRowB * N + tiledColB];
-        else
-          Bsub[localRow][localCol] = 0.0f;
-
+        // Synchronize
         barrier(CLK_LOCAL_MEM_FENCE);
 
-        for (int k = 0; k < TS; ++k)
-          sum += Asub[localRow][k] * Bsub[k][localCol];
+        // Perform the computation for this tile
+        for (int k = 0; k < TSK; k++) {
+          
+          // Cache the values of Bsub in registers
+          for (int wn = 0; wn < WPTN; wn++) {
+            int col = tidn + wn * RTSN;
+            Breg[wn] = Bsub[k][col];
+          }
 
+          // Perform WPTM * WPTN computations
+          for (int wm = 0; wm < WPTM; wm++) {
+            int row = tidm + wm * RTSM;
+            Areg[wm] = Asub[k][row];
+            for (int wn = 0; wn < WPTN; wn++) {
+              Creg[wm][wn] += Areg[wm] * Breg[wn];
+            }
+          }
+        }
+
+        // Synchronize
         barrier(CLK_LOCAL_MEM_FENCE);
       }
 
-      if (globalRow < M && globalCol < N)
-        C[globalRow * N + globalCol] = sum;
+      // Store the final results in C
+      for (int wm = 0; wm < WPTM; wm++) {
+        int globalRow = offsetM + tidm + wm * RTSM;
+        if (globalRow < M) {
+          for (int wn = 0; wn < WPTN; wn++) {
+            int globalCol = offsetN + tidn + wn * RTSN;
+            if (globalCol < N) {
+              C[globalRow * N + globalCol] = Creg[wm][wn];
+            }
+          }
+        }
+      }
     }
     )";
   return sgemm_cl_noTrans_kernel_;

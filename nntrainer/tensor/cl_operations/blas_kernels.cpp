@@ -446,12 +446,14 @@ void sgemm_cl(bool TransA, bool TransB, const float *A, const float *B,
     if (!result) {
       break;
     }
-    const int tiled_size = 16;
+    
+    // Optimized work group sizes for transformer workloads
+    const int TSM = 64, TSN = 64, WPTM = 4, WPTN = 4;
     const int work_groups_count[3] = {
-      (int)((N + tiled_size - 1) / tiled_size) * tiled_size,
-      (int)((M + tiled_size - 1) / tiled_size) * tiled_size, 1}; // test-value
+      (int)((N + TSN - 1) / TSN) * (TSN / WPTN),
+      (int)((M + TSM - 1) / TSM) * (TSM / WPTM), 1};
 
-    const int work_group_size[3] = {tiled_size, tiled_size, 1}; // test-value
+    const int work_group_size[3] = {TSN / WPTN, TSM / WPTM, 1}; // 16x16x1 for optimized SGEMM
 
     result = blas_cc->command_queue_inst_.DispatchCommand(
       kernel_sgemm_ptr, work_groups_count, work_group_size);
