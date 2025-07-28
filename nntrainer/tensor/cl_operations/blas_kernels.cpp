@@ -271,9 +271,9 @@ void sgemv_cl(const float *matAdata, const float *vecXdata, float *vecYdata,
       break;
     }
 
-    const int work_groups_count[3] = {(int)dim1, 1, 1};
-    /// @todo: create a group size by device & input
-    const int work_group_size[3] = {1, 1, 1};
+    const int work_groups_count[3] = {(int)((dim1 + 63) / 64) * 64, 1, 1};
+    /// Optimized work group size for vector operations
+    const int work_group_size[3] = {64, 1, 1};
 
     result = opencl::CommandQueueManager::GetInstance().DispatchCommand(
       kernel_sgemv_ptr, work_groups_count, work_group_size);
@@ -340,9 +340,9 @@ float dot_cl(const float *vecAdata, const float *vecXdata, unsigned int dim1) {
       break;
     }
 
-    const int work_groups_count[3] = {(int)dim1, 1, 1};
-    /// @todo: create a group size by device & input
-    const int work_group_size[3] = {1, 1, 1}; // test-value
+    const int work_groups_count[3] = {(int)((dim1 + 63) / 64) * 64, 1, 1};
+    /// Optimized work group size for dot product reduction
+    const int work_group_size[3] = {64, 1, 1};
 
     result = blas_cc->command_queue_inst_.DispatchCommand(
       kernel_dot_ptr, work_groups_count, work_group_size);
@@ -519,9 +519,9 @@ void addition_cl(const float *input, float *res, unsigned int size_input,
       break;
     }
 
-    const int work_groups_count[3] = {(int)size_res, 1, 1};
-    /// @todo: create a group size by device & input
-    const int work_group_size[3] = {1, 1, 1}; // test-value
+    const int work_groups_count[3] = {(int)((size_res + 63) / 64) * 64, 1, 1};
+    /// Optimized work group size for element-wise operations
+    const int work_group_size[3] = {64, 1, 1};
     result = blas_cc->command_queue_inst_.DispatchCommand(
       kernel_addition_ptr, work_groups_count, work_group_size);
     if (!result) {
@@ -568,9 +568,9 @@ void sscal_cl(float *X, const unsigned int N, const float alpha) {
       break;
     }
 
-    const int work_groups_count[3] = {(int)N, 1, 1};
-    /// @todo: create a group size by device & input
-    const int work_group_size[3] = {1, 1, 1}; // test-value
+    const int work_groups_count[3] = {(int)((N + 63) / 64) * 64, 1, 1};
+    /// Optimized work group size for scaling operations
+    const int work_group_size[3] = {64, 1, 1};
 
     result = blas_cc->command_queue_inst_.DispatchCommand(
       kernel_ptr, work_groups_count, work_group_size);
@@ -668,12 +668,12 @@ void transpose_cl_axis(const float *in, float *res,
       break;
     }
 
-    int work_groups_count[3] = {(int)input_height, (int)input_width, 1};
+    int work_groups_count[3] = {(int)((input_height + 15) / 16) * 16, (int)((input_width + 15) / 16) * 16, 1};
     if (axis == 2)
-      work_groups_count[0] = (int)input_channels;
+      work_groups_count[0] = (int)((input_channels + 15) / 16) * 16;
 
-    /// @todo: create a group size by device & input
-    const int work_group_size[3] = {1, 1, 1}; // test-value
+    /// Optimized 2D work group for transpose operations
+    const int work_group_size[3] = {16, 16, 1};
 
     result = blas_cc->command_queue_inst_.DispatchCommand(
       kernel_transpose_ptr, work_groups_count, work_group_size);
