@@ -104,7 +104,36 @@ const cl_command_queue CommandQueueManager::GetCommandQueue() {
 }
 
 /**
- * @brief Reading buffer object. Used from Buffer class
+ * @brief Reading buffer object with optional event for async operations
+ *
+ * @param buffer cl_mem buffer object
+ * @param size_in_bytes size of data
+ * @param data getting the data stored in buffer
+ * @param async flag for asynchronous operation
+ * @param event event for tracking completion
+ * @return true if reading is successful or false otherwise
+ */
+bool CommandQueueManager::EnqueueReadBuffer(cl_mem buffer, size_t size_in_bytes,
+                                            void *data, bool async, cl_event *event) {
+
+  // managing synchronization
+  const cl_bool blocking = async ? CL_FALSE : CL_TRUE;
+  // returns NULL with error code if fails
+  auto error_code =
+    clEnqueueReadBuffer(command_queue_, buffer, blocking, 0, size_in_bytes,
+                        data, 0, nullptr, event);
+  if (error_code != CL_SUCCESS) {
+    ml_loge("Failed to read data from GPU (clEnqueueReadBuffer). OpenCL error "
+            "code: %d",
+            error_code);
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * @brief Reading buffer object. Used from Buffer class (legacy interface)
  *
  * @param buffer cl_mem buffer object
  * @param size_in_bytes size of data
@@ -114,21 +143,7 @@ const cl_command_queue CommandQueueManager::GetCommandQueue() {
  */
 bool CommandQueueManager::EnqueueReadBuffer(cl_mem buffer, size_t size_in_bytes,
                                             void *data, bool async) {
-
-  // managing synchronization
-  const cl_bool blocking = async ? CL_FALSE : CL_TRUE;
-  // returns NULL with error code if fails
-  auto error_code =
-    clEnqueueReadBuffer(command_queue_, buffer, blocking, 0, size_in_bytes,
-                        data, 0, nullptr, nullptr);
-  if (error_code != CL_SUCCESS) {
-    ml_loge("Failed to read data from GPU (clEnqueueReadBuffer). OpenCL error "
-            "code: %d",
-            error_code);
-    return false;
-  }
-
-  return true;
+  return EnqueueReadBuffer(buffer, size_in_bytes, data, async, nullptr);
 }
 
 bool CommandQueueManager::EnqueueReadBufferRegion(
@@ -392,7 +407,9 @@ bool CommandQueueManager::DispatchCommand(
     return false;
   }
 
-  clFinish(command_queue_);
+  // Remove synchronous clFinish() call - let kernels execute asynchronously
+  // This improves pipeline throughput for transformer/attention layers
+  // clFinish(command_queue_);
 
   return true;
 }
