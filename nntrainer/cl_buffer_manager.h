@@ -17,6 +17,7 @@
 
 #include <opencl_buffer.h>
 #include <opencl_context_manager.h>
+#include <vector>
 
 #include <nntrainer_log.h>
 
@@ -45,18 +46,24 @@ private:
    * @brief OpenCl context global instance
    *
    */
-  opencl::ContextManager &context_inst_ = opencl::ContextManager::GetInstance();
+  opencl::ContextManager &context_inst_ =
+    opencl::ContextManager::GetInstance();
 
-  /**
-   * @brief Buffer size in bytes preset (256 mebibytes)
-   */
-  const size_t buffer_size_bytes = 8192 * 8192 * sizeof(float);
+  // Buffer size in bytes (128MB default for transformer workloads)
+  size_t buffer_size_bytes = 128 * 1024 * 1024;
 
   opencl::Buffer *inBufferA;
   opencl::Buffer *inBufferB;
   opencl::Buffer *inBufferC;
   opencl::Buffer *outBufferA;
   opencl::Buffer *outBufferB;
+  
+  // Add pinned host memory for faster transfers
+  void *pinnedHostMemory;
+  size_t pinnedMemorySize;
+  
+  // Event queue for async operations
+  std::vector<cl_event> transferEvents;
 
 public:
   /**
