@@ -7,17 +7,80 @@
  * @see    https://github.com/nnstreamer/nntrainer
  * @author Donghyeon Jeong <dhyeon.jeong@samsung.com>
  * @bug    No known bugs except for NYI items
- * @brief  This is a header for AVX implementation
+ * @brief  This is AVX2 implementation header with Windows x64 optimizations
  *
  */
 
-#ifndef __AVX2_IMPL_H_
-#define __AVX2_IMPL_H_
+#ifndef __AVX2_IMPL_H__
+#define __AVX2_IMPL_H__
 #ifdef __cplusplus
+
+#include <cstdint>
+#include <stdexcept>
 
 namespace nntrainer::avx2 {
 
-#ifdef ENABLE_FP16
+/**
+ * @brief sqr(x) / (1 + exp(-x)) activation function : X = (Y^2 * sigmoid(Y)) * Z
+ *
+ * @param N number of elements in X
+ * @param X float * for Vector X
+ * @param Y float * for Vector Y
+ * @param Z float * for Vector Z
+ */
+void sqrswish(const unsigned int N, float *X, float *Y, float *Z);
+
+/**
+ * @brief swiglu function : X = (Y / (1 + exp( -Y ))) * Z
+ *
+ * @param N number of elements in X
+ * @param X float * for Vector X
+ * @param Y float * for Vector Y
+ * @param Z float * for Vector Z
+ */
+void swiglu(const unsigned int N, float *X, float *Y, float *Z);
+
+/**
+ * @brief returns maximum value of the vector X
+ *
+ * @param N number of elements in X
+ * @param X float * for Vector X
+ * @return float maximum value of vector X
+ */
+float max_val(const unsigned int N, float *X);
+
+/**
+ * @brief soft max function with avx2 y_i = exp(x_i) / sum( exp(x_i) )
+ *
+ * @param N number of elements in X
+ * @param X float * for Vector X
+ * @param Y  float * for Vector Y
+ */
+void softmax(const unsigned int N, float *X, float *Y);
+
+/**
+ * @brief Windows x64 optimized cache-blocked SGEMM for transformer workloads
+ * 
+ * @param TransA Whether to transpose matrix A
+ * @param TransB Whether to transpose matrix B
+ * @param M Number of rows in A and C
+ * @param N Number of columns in B and C
+ * @param K Number of columns in A and rows in B
+ * @param alpha Scaling factor for A*B
+ * @param A Input matrix A
+ * @param lda Leading dimension of A
+ * @param B Input matrix B  
+ * @param ldb Leading dimension of B
+ * @param beta Scaling factor for C
+ * @param C Output matrix C
+ * @param ldc Leading dimension of C
+ */
+void sgemm_blocked_x64_optimized(bool TransA, bool TransB,
+                                const int M, const int N, const int K,
+                                const float alpha, const float *A, const int lda,
+                                const float *B, const int ldb,
+                                const float beta, float *C, const int ldc);
+
 /**
  * @brief Converts half-precision floating point values to single-precision
  * floating point values.
@@ -80,16 +143,6 @@ void custom_scopy(const unsigned int N, const float *X, const int incX,
 void transpose_matrix(const unsigned int M, const unsigned int N,
                       const float *src, unsigned int ld_src, float *dst,
                       unsigned int ld_dst);
-
-/**
- * @brief swiglu function with AVX : X = (Y / (1 + exp( -Y ))) * Z
- *
- * @param N number of elements in X
- * @param X float * for Vector X
- * @param Y float * for Vector Y
- * @param Z float * for Vector Z
- */
-void swiglu(const unsigned int N, float *X, const float *Y, const float *Z);
 
 /**
  * @brief     elementwise vector multiplication : Z = X ⊙ alpha * Y +
