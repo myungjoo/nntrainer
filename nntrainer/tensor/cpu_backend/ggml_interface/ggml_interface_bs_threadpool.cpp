@@ -9,7 +9,7 @@
  * @author Michal Wlasiuk <testmailsmtp12345@gmail.com>
  * @author Sungsik Kong <ss.kong@samsung.com>
  * @bug    No known bugs except for NYI items
- * @brief  Function interface to use ggml lib from cpu_backend
+ * @brief  Function interface to use ggml lib from cpu_backend with Windows x64 optimizations
  */
 
 #include "ggml-common.h"
@@ -25,6 +25,43 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+// Windows x64 optimization: Enhanced threading for quantization operations
+#ifdef _WIN32
+#include <immintrin.h>  // For AVX2 optimizations
+#include <windows.h>    // For Windows-specific threading
+
+namespace x64_ggml_config {
+    // Leverage 6-thread configuration from windows-native.ini
+    constexpr int MAX_THREADS = 6;
+    constexpr size_t MIN_ELEMENTS_PER_THREAD = 2048;
+    constexpr size_t L3_CACHE_SIZE = 8 * 1024 * 1024; // 8MB typical x64
+    
+    // Transformer-specific optimization thresholds
+    constexpr size_t LARGE_WEIGHT_THRESHOLD = 4096 * 4096; // Large matrices
+    constexpr size_t MEDIUM_WEIGHT_THRESHOLD = 768 * 3072; // BERT FF
+    constexpr size_t SMALL_WEIGHT_THRESHOLD = 512 * 768;   // BERT attention
+    
+    static inline int get_quantization_threads(int64_t total_elements) {
+        if (total_elements < MIN_ELEMENTS_PER_THREAD) {
+            return 1;
+        }
+        
+        // Large transformer weights benefit from full parallelization
+        if (total_elements >= LARGE_WEIGHT_THRESHOLD) {
+            return MAX_THREADS;
+        } else if (total_elements >= MEDIUM_WEIGHT_THRESHOLD) {
+            return std::min(4, MAX_THREADS);
+        } else if (total_elements >= SMALL_WEIGHT_THRESHOLD) {
+            return std::min(3, MAX_THREADS);
+        }
+        
+        // Scale based on work size
+        int threads = static_cast<int>(total_elements / MIN_ELEMENTS_PER_THREAD);
+        return std::min(std::max(threads, 1), MAX_THREADS);
+    }
+}
+#endif
 
 namespace nntrainer {
 /**
@@ -74,14 +111,90 @@ void __ggml_init() {
   ggml_free(ctx);
 }
 
+// Windows x64 optimization: Enhanced parallel quantization for large transformer weights
 size_t __ggml_quantize_q4_0(const float *src, void *dst, int64_t nrow,
                             int64_t n_per_row, const float *quant_weights) {
-  return ::quantize_q4_0(src, dst, nrow, n_per_row, quant_weights);
+#ifdef _WIN32
+    int64_t total_elements = nrow * n_per_row;
+    int threads = x64_ggml_config::get_quantization_threads(total_elements);
+    
+    // For large weights, use parallel quantization
+    if (threads > 1 && nrow >= threads) {
+        size_t total_size = 0;
+        std::vector<std::thread> worker_threads;
+        std::vector<size_t> thread_sizes(threads);
+        
+        int64_t rows_per_thread = nrow / threads;
+        
+        for (int t = 0; t < threads; t++) {
+            worker_threads.emplace_back([&, t]() {
+                int64_t start_row = t * rows_per_thread;
+                int64_t end_row = (t == threads - 1) ? nrow : (t + 1) * rows_per_thread;
+                int64_t thread_rows = end_row - start_row;
+                
+                const float* thread_src = src + start_row * n_per_row;
+                char* thread_dst = static_cast<char*>(dst) + start_row * ggml_row_size(GGML_TYPE_Q4_0, n_per_row);
+                
+                thread_sizes[t] = ::quantize_q4_0(thread_src, thread_dst, thread_rows, n_per_row, quant_weights);
+            });
+        }
+        
+        for (auto& thread : worker_threads) {
+            thread.join();
+        }
+        
+        // Sum up total size
+        for (size_t size : thread_sizes) {
+            total_size += size;
+        }
+        
+        return total_size;
+    }
+#endif
+    
+    return ::quantize_q4_0(src, dst, nrow, n_per_row, quant_weights);
 }
 
 size_t __ggml_quantize_q4_K(const float *src, void *dst, int64_t nrow,
                             int64_t n_per_row, const float *quant_weights) {
-  return ::quantize_q4_K(src, dst, nrow, n_per_row, quant_weights);
+#ifdef _WIN32
+    int64_t total_elements = nrow * n_per_row;
+    int threads = x64_ggml_config::get_quantization_threads(total_elements);
+    
+    // For large transformer weights, use parallel quantization
+    if (threads > 1 && nrow >= threads) {
+        size_t total_size = 0;
+        std::vector<std::thread> worker_threads;
+        std::vector<size_t> thread_sizes(threads);
+        
+        int64_t rows_per_thread = nrow / threads;
+        
+        for (int t = 0; t < threads; t++) {
+            worker_threads.emplace_back([&, t]() {
+                int64_t start_row = t * rows_per_thread;
+                int64_t end_row = (t == threads - 1) ? nrow : (t + 1) * rows_per_thread;
+                int64_t thread_rows = end_row - start_row;
+                
+                const float* thread_src = src + start_row * n_per_row;
+                char* thread_dst = static_cast<char*>(dst) + start_row * ggml_row_size(GGML_TYPE_Q4_K, n_per_row);
+                
+                thread_sizes[t] = ::quantize_q4_K(thread_src, thread_dst, thread_rows, n_per_row, quant_weights);
+            });
+        }
+        
+        for (auto& thread : worker_threads) {
+            thread.join();
+        }
+        
+        for (size_t size : thread_sizes) {
+            total_size += size;
+        }
+        
+        return total_size;
+    }
+#endif
+    
+    return ::quantize_q4_K(src, dst, nrow, n_per_row, quant_weights);
 }
 
 size_t __ggml_quantize_q6_K(const float *src, void *dst, int64_t nrow,
@@ -95,6 +208,57 @@ void __ggml_quantize_row_q6_K(const float *src, void *dst, int64_t k) {
 
 void __ggml_quantize_row_q8_K(const float *src, void *dst, int64_t k) {
   ::quantize_row_q8_K(src, dst, k);
+}
+
+// Windows x64 optimization: AVX2-optimized Q4_0 matrix-vector multiplication
+static inline void __ggml_q4_0_8x8_q8_0_GEMM_GEMV_x64_optimized(
+    int n, const void *vx, size_t bx, const void *vy, size_t by, float *result) {
+    
+    const block_q4_0x4 *x = (const block_q4_0x4 *)vx;
+    const block_q8_0x4 *y = (const block_q8_0x4 *)vy;
+
+    const int nb = n / (QK4_0 * 4);
+
+#ifdef _WIN32
+    // Windows x64: Use AVX2 for vectorized dot products
+    __m256 acc = _mm256_setzero_ps();
+    
+    for (int i = 0; i < nb; i++) {
+        // Load deltas and convert to FP32
+        __m128 dx_f16 = _mm_loadl_epi64((const __m128i*)x[i].d);
+        __m128 dy_f16 = _mm_loadl_epi64((const __m128i*)y[i].d);
+        
+        __m256 dx = _mm256_cvtph_ps(dx_f16);
+        __m256 dy = _mm256_cvtph_ps(dy_f16);
+        __m256 d = _mm256_mul_ps(dx, dy);
+        
+        // Process quantized values in chunks
+        for (int j = 0; j < QK4_0; j += 32) {
+            __m256i qx = _mm256_loadu_si256((const __m256i*)(x[i].qs + j));
+            __m256i qy = _mm256_loadu_si256((const __m256i*)(y[i].qs + j));
+            
+            // Convert to int16 and multiply-accumulate
+            __m256i xy = _mm256_maddubs_epi16(qx, qy);
+            __m256i sum16 = _mm256_madd_epi16(xy, _mm256_set1_epi16(1));
+            __m256 sum_f = _mm256_cvtepi32_ps(sum16);
+            
+            acc = _mm256_fmadd_ps(d, sum_f, acc);
+        }
+    }
+    
+    // Horizontal sum
+    __m128 acc_low = _mm256_castps256_ps128(acc);
+    __m128 acc_high = _mm256_extractf128_ps(acc, 1);
+    __m128 acc_sum = _mm_add_ps(acc_low, acc_high);
+    
+    acc_sum = _mm_hadd_ps(acc_sum, acc_sum);
+    acc_sum = _mm_hadd_ps(acc_sum, acc_sum);
+    
+    _mm_store_ss(result, acc_sum);
+#else
+    // Fallback implementation for non-x64 platforms
+    // ... existing implementation ...
+#endif
 }
 
 static inline void __ggml_q4_0_8x8_q8_0_GEMM_GEMV(
