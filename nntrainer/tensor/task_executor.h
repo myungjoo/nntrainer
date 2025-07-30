@@ -4,7 +4,7 @@
  *
  * @file   task_executor.h
  * @date   04 April 2025
- * @brief  This file contains a task executor
+ * @brief  This file contains a task executor with Windows x64 optimizations
  * @see    https://github.com/nnstreamer/nntrainer
  * @author Jijoong Moon <jijoong.moon@samsung.com>
  * @bug    No known bugs except for NYI items
@@ -21,6 +21,7 @@
 #include <future>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <queue>
 #include <task.h>
@@ -36,9 +37,18 @@ namespace nntrainer {
  */
 using TaskCallback = std::function<void(void *)>;
 
+// Windows x64 optimization: Transformer-specific task types for optimal scheduling
+enum class TransformerTaskType {
+  ATTENTION_HEADS,    // Multi-head attention parallel processing
+  FEEDFORWARD,        // Feed-forward layer operations  
+  LAYERNORM,          // Layer normalization operations
+  MATMUL,            // Matrix multiplication operations
+  GENERIC            // General purpose tasks
+};
+
 /**
  * @class TaskExecutor Class
- * @brief This is load / unload Task Executor with thread pool
+ * @brief This is load / unload Task Executor with thread pool optimized for Windows x64
  *
  */
 class TaskExecutor {
@@ -98,6 +108,18 @@ public:
   int submit(TaskCallback cb, void *data = nullptr);
 
   /**
+   * @brief Windows x64 optimized batch task submission for transformer operations
+   * 
+   * @param callbacks Vector of task callbacks
+   * @param data Vector of data pointers  
+   * @param task_type Type of transformer operation for optimal scheduling
+   * @return Task ID of the batch leader
+   */
+  int submit_batch_transformer(const std::vector<TaskCallback>& callbacks,
+                              const std::vector<void*>& data,
+                              TransformerTaskType task_type = TransformerTaskType::GENERIC);
+
+  /**
    * @brief Cancel Task
    *
    */
@@ -152,10 +174,24 @@ private:
   };
 
   /**
-   * @brief Create Worker Thread
-   *
+   * @brief Create Worker Thread with Windows x64 optimizations
+   * @param worker_id Unique identifier for the worker thread
    */
-  void worker_thread();
+  void worker_thread(size_t worker_id);
+
+#ifdef _WIN32
+  /**
+   * @brief Windows x64: Submit batched tasks for optimal CPU utilization
+   * 
+   * @param callbacks Vector of task callbacks
+   * @param data Vector of data pointers
+   * @param num_batches Number of batches to create
+   * @return Task ID of the batch operation
+   */
+  int submit_batched_tasks(const std::vector<TaskCallback>& callbacks,
+                          const std::vector<void*>& data,
+                          int num_batches);
+#endif
 
   /**
    * @brief Get Next Task Id for protect the overflow
