@@ -8,7 +8,7 @@
  * @author Donghyeon Jeong <dhyeon.jeong@samsung.com>
  * @author Sungsik Kong <ss.kong@samsung.com>
  * @bug    No known bugs except for NYI items
- * @brief  This is a source for AVX implementation
+ * @brief  This is a source for AVX implementation with Windows x64 optimizations
  *
  */
 
@@ -81,6 +81,19 @@
 #if !defined(_MSC_VER) && !defined(__clang__)
 #pragma GCC diagnostic ignored "-Wattributes"
 #endif
+
+// Windows x64 optimization: Cache parameters for LLM workloads
+namespace x64_cache_config {
+    constexpr size_t L1_CACHE_SIZE = 32 * 1024;      // 32KB L1 cache
+    constexpr size_t L2_CACHE_SIZE = 256 * 1024;     // 256KB L2 cache  
+    constexpr size_t L3_CACHE_SIZE = 8 * 1024 * 1024; // 8MB L3 cache (typical x64)
+    constexpr size_t CACHE_LINE_SIZE = 64;            // 64-byte cache lines
+    
+    // Optimal blocking sizes for transformer operations
+    constexpr int BLOCK_M = 128;  // Optimized for 512, 768, 1024 dimensions
+    constexpr int BLOCK_N = 256;  // Good for feed-forward layers
+    constexpr int BLOCK_K = 128;  // Balance L1 cache usage
+}
 
 namespace {
 
@@ -301,6 +314,173 @@ avx2_approx_swiglu(__m256 x, __m256 s) noexcept -> __m256 {
   auto swiglu_nonscaled = _mm256_div_ps(x, inv_sigmoid);
   return _mm256_mul_ps(swiglu_nonscaled, s);
 }
+
+// Windows x64 optimization: Enhanced FMA-based micro-kernel for SGEMM
+_nnt_ATTR_ALWAYS_INLINE inline void sgemm_micro_kernel_8x8_fma(
+    const float* A, const float* B, float* C, 
+    int lda, int ldb, int ldc,
+    float alpha, float beta) {
+    
+    // Load 8x8 block of C matrix
+    __m256 c0 = _mm256_loadu_ps(C + 0 * ldc);
+    __m256 c1 = _mm256_loadu_ps(C + 1 * ldc);
+    __m256 c2 = _mm256_loadu_ps(C + 2 * ldc);
+    __m256 c3 = _mm256_loadu_ps(C + 3 * ldc);
+    __m256 c4 = _mm256_loadu_ps(C + 4 * ldc);
+    __m256 c5 = _mm256_loadu_ps(C + 5 * ldc);
+    __m256 c6 = _mm256_loadu_ps(C + 6 * ldc);
+    __m256 c7 = _mm256_loadu_ps(C + 7 * ldc);
+    
+    // Scale by beta
+    __m256 beta_vec = _mm256_set1_ps(beta);
+    c0 = _mm256_mul_ps(c0, beta_vec);
+    c1 = _mm256_mul_ps(c1, beta_vec);
+    c2 = _mm256_mul_ps(c2, beta_vec);
+    c3 = _mm256_mul_ps(c3, beta_vec);
+    c4 = _mm256_mul_ps(c4, beta_vec);
+    c5 = _mm256_mul_ps(c5, beta_vec);
+    c6 = _mm256_mul_ps(c6, beta_vec);
+    c7 = _mm256_mul_ps(c7, beta_vec);
+    
+    __m256 alpha_vec = _mm256_set1_ps(alpha);
+    
+    // Inner loop for K dimension - unrolled for better pipeline utilization
+    for (int k = 0; k < 8; k += 4) {
+        // Load A values (8 elements)
+        __m256 a0 = _mm256_loadu_ps(A + k * lda);
+        __m256 a1 = _mm256_loadu_ps(A + (k+1) * lda);
+        __m256 a2 = _mm256_loadu_ps(A + (k+2) * lda);
+        __m256 a3 = _mm256_loadu_ps(A + (k+3) * lda);
+        
+        // Load B values with broadcasting
+        __m256 b0 = _mm256_broadcast_ss(B + k * ldb + 0);
+        __m256 b1 = _mm256_broadcast_ss(B + k * ldb + 1);
+        __m256 b2 = _mm256_broadcast_ss(B + k * ldb + 2);
+        __m256 b3 = _mm256_broadcast_ss(B + k * ldb + 3);
+        __m256 b4 = _mm256_broadcast_ss(B + k * ldb + 4);
+        __m256 b5 = _mm256_broadcast_ss(B + k * ldb + 5);
+        __m256 b6 = _mm256_broadcast_ss(B + k * ldb + 6);
+        __m256 b7 = _mm256_broadcast_ss(B + k * ldb + 7);
+        
+        // FMA operations - k=0
+        c0 = _mm256_fmadd_ps(a0, b0, c0);
+        c1 = _mm256_fmadd_ps(a0, b1, c1);
+        c2 = _mm256_fmadd_ps(a0, b2, c2);
+        c3 = _mm256_fmadd_ps(a0, b3, c3);
+        c4 = _mm256_fmadd_ps(a0, b4, c4);
+        c5 = _mm256_fmadd_ps(a0, b5, c5);
+        c6 = _mm256_fmadd_ps(a0, b6, c6);
+        c7 = _mm256_fmadd_ps(a0, b7, c7);
+        
+        // FMA operations - k=1  
+        b0 = _mm256_broadcast_ss(B + (k+1) * ldb + 0);
+        b1 = _mm256_broadcast_ss(B + (k+1) * ldb + 1);
+        b2 = _mm256_broadcast_ss(B + (k+1) * ldb + 2);
+        b3 = _mm256_broadcast_ss(B + (k+1) * ldb + 3);
+        b4 = _mm256_broadcast_ss(B + (k+1) * ldb + 4);
+        b5 = _mm256_broadcast_ss(B + (k+1) * ldb + 5);
+        b6 = _mm256_broadcast_ss(B + (k+1) * ldb + 6);
+        b7 = _mm256_broadcast_ss(B + (k+1) * ldb + 7);
+        
+        c0 = _mm256_fmadd_ps(a1, b0, c0);
+        c1 = _mm256_fmadd_ps(a1, b1, c1);
+        c2 = _mm256_fmadd_ps(a1, b2, c2);
+        c3 = _mm256_fmadd_ps(a1, b3, c3);
+        c4 = _mm256_fmadd_ps(a1, b4, c4);
+        c5 = _mm256_fmadd_ps(a1, b5, c5);
+        c6 = _mm256_fmadd_ps(a1, b6, c6);
+        c7 = _mm256_fmadd_ps(a1, b7, c7);
+    }
+    
+    // Scale by alpha and store results
+    c0 = _mm256_mul_ps(c0, alpha_vec);
+    c1 = _mm256_mul_ps(c1, alpha_vec);
+    c2 = _mm256_mul_ps(c2, alpha_vec);
+    c3 = _mm256_mul_ps(c3, alpha_vec);
+    c4 = _mm256_mul_ps(c4, alpha_vec);
+    c5 = _mm256_mul_ps(c5, alpha_vec);
+    c6 = _mm256_mul_ps(c6, alpha_vec);
+    c7 = _mm256_mul_ps(c7, alpha_vec);
+    
+    _mm256_storeu_ps(C + 0 * ldc, c0);
+    _mm256_storeu_ps(C + 1 * ldc, c1);
+    _mm256_storeu_ps(C + 2 * ldc, c2);
+    _mm256_storeu_ps(C + 3 * ldc, c3);
+    _mm256_storeu_ps(C + 4 * ldc, c4);
+    _mm256_storeu_ps(C + 5 * ldc, c5);
+    _mm256_storeu_ps(C + 6 * ldc, c6);
+    _mm256_storeu_ps(C + 7 * ldc, c7);
+}
+
+// Windows x64 optimization: Cache-blocked SGEMM optimized for transformer workloads
+void sgemm_blocked_x64_optimized(bool TransA, bool TransB, 
+                                const int M, const int N, const int K,
+                                const float alpha, const float *A, const int lda,
+                                const float *B, const int ldb,
+                                const float beta, float *C, const int ldc) {
+    
+    using namespace x64_cache_config;
+    
+    // Use adaptive blocking based on problem size
+    int block_m = std::min(BLOCK_M, M);
+    int block_n = std::min(BLOCK_N, N); 
+    int block_k = std::min(BLOCK_K, K);
+    
+    // Adjust block sizes for transformer dimensions
+    if (M == 768 || M == 1024 || M == 2048) {
+        block_m = std::min(128, M);
+    }
+    if (N >= 3072) { // Feed-forward dimension
+        block_n = std::min(256, N);
+    }
+    
+    for (int ii = 0; ii < M; ii += block_m) {
+        for (int jj = 0; jj < N; jj += block_n) {
+            for (int kk = 0; kk < K; kk += block_k) {
+                
+                int m_block = std::min(block_m, M - ii);
+                int n_block = std::min(block_n, N - jj);
+                int k_block = std::min(block_k, K - kk);
+                
+                // Micro-kernel for 8x8 blocks
+                for (int i = ii; i < ii + m_block; i += 8) {
+                    for (int j = jj; j < jj + n_block; j += 8) {
+                        int actual_m = std::min(8, ii + m_block - i);
+                        int actual_n = std::min(8, jj + n_block - j);
+                        
+                        if (actual_m == 8 && actual_n == 8) {
+                            // Use optimized 8x8 kernel
+                            sgemm_micro_kernel_8x8_fma(
+                                A + i * lda + kk, 
+                                B + kk * ldb + j,
+                                C + i * ldc + j,
+                                lda, ldb, ldc,
+                                alpha, (kk == 0) ? beta : 1.0f);
+                        } else {
+                            // Fallback for edge cases
+                            for (int mi = 0; mi < actual_m; mi++) {
+                                for (int ni = 0; ni < actual_n; ni++) {
+                                    float sum = 0.0f;
+                                    for (int ki = 0; ki < k_block; ki++) {
+                                        sum += A[(i + mi) * lda + kk + ki] * 
+                                               B[(kk + ki) * ldb + j + ni];
+                                    }
+                                    if (kk == 0) {
+                                        C[(i + mi) * ldc + j + ni] = 
+                                            alpha * sum + beta * C[(i + mi) * ldc + j + ni];
+                                    } else {
+                                        C[(i + mi) * ldc + j + ni] += alpha * sum;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 } // namespace
 
 namespace nntrainer::avx2 {
