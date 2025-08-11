@@ -16,6 +16,7 @@
 #include "bs_thread_pool_manager.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 
 namespace nntrainer {
 /**
@@ -25,13 +26,40 @@ namespace nntrainer {
  */
 BS::thread_pool<> ThreadPoolManager::pool(std::thread::hardware_concurrency());
 
+void ThreadPoolManager::configure_for_llm() {
+  static bool configured = false;
+  if (configured)
+    return;
+
+#ifdef BS_THREAD_POOL_NATIVE_EXTENSIONS
+  // Elevate process priority if allowed
+  BS::set_os_process_priority(BS::os_process_priority::above_normal);
+
+  // Prefer compact core affinity: pin process to physical cores first.
+  if (auto affinity = BS::get_os_process_affinity()) {
+    // Keep all allowed CPUs but we could optionally compact to first N cores
+    // to improve cache locality on Windows.
+    BS::set_os_process_affinity(*affinity);
+  }
+
+  // Name worker threads for diagnostics and set thread priority higher
+  auto handles = pool.get_native_handles();
+  for (size_t i = 0; i < handles.size(); ++i) {
+    (void)i; // suppress unused warning when setters are no-op
+    BS::this_thread::set_os_thread_priority(
+      BS::os_thread_priority::above_normal);
+  }
+#endif
+  configured = true;
+}
+
 std::size_t ThreadPoolManager::select_k_quant_thread_count(unsigned int M,
                                                            unsigned int N,
                                                            unsigned int K) {
   const std::size_t max_threads = std::thread::hardware_concurrency();
 
   const std::size_t work_size = static_cast<std::size_t>(M * N * K);
-  std::size_t est_threads;
+  std::size_t est_threads = 1;
 
   //  Use log-scale thresholds to reduce threads on smaller work sizes
   if (work_size < 1536 * 1536)

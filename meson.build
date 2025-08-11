@@ -113,11 +113,17 @@ elif arch == 'x86' or arch == 'x86_64'
     add_project_arguments(['-march=native'], language: ['c','cpp'])
     add_project_arguments(['-mavx2', '-mfma'], language: ['c','cpp'])
     message('-march=native added for AVX hardware acceleration.')
-  endif
+    endif
 endif
 
+# Enable BS thread-pool native extensions on Windows to allow
+# thread priority and affinity tuning for LLM inference
+if get_option('platform') == 'windows'
+  extra_defines += '-DBS_THREAD_POOL_NATIVE_EXTENSIONS=1'
+endif
+ 
 if get_option('enable-fp16')
-   if get_option('platform') == 'android'
+if get_option('platform') == 'android'
      add_project_arguments('-mfp16-format=ieee', language: ['c', 'cpp'])
      extra_defines += '-DENABLE_FP16=1'
      extra_defines += '-DUSE__FP16=1'
