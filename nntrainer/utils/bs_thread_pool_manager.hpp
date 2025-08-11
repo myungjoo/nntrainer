@@ -57,6 +57,12 @@ public:
    */
   static BS::thread_pool<> &getInstance() { return pool; }
 
+  /**
+   * @brief Configure the global thread pool for LLM inference: set high thread
+   * priority and compact affinity if supported. Idempotent.
+   */
+  static void configure_for_llm();
+
 private:
   /**
    * @brief Construct a new Thread Pool Manager object

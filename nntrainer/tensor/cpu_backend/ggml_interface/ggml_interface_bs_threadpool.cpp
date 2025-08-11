@@ -25,6 +25,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <cstdlib>
 
 namespace nntrainer {
 /**
@@ -111,7 +112,8 @@ static inline void __ggml_q4_0_8x8_q8_0_GEMM_GEMV(
   int B_step = sizeof(block_q4_0) * (K / QK4_0);
 
   auto &bs_thread_pool = ThreadPoolManager::getInstance();
-  int thread_num = bs_thread_pool.get_thread_count();
+  const int max_threads = static_cast<int>(bs_thread_pool.get_thread_count());
+  const int thread_num = std::max(1, std::min(max_threads, static_cast<int>((N + 63) / 64)));
   BS::multi_future<void> loop_future =
     bs_thread_pool.submit_loop(0, thread_num, [=](int i) {
       unsigned int M_step_start = (i * N) / thread_num;
@@ -156,7 +158,8 @@ static inline void __ggml_q4_0_8x8_q8_0_GEMM_GEMM(
   }
 
   ///@todo Dynamic thread-number selection for GEMM problem size
-  int thread_num = bs_thread_pool.get_thread_count();
+  const int max_threads = static_cast<int>(bs_thread_pool.get_thread_count());
+  const int thread_num = std::max(1, std::min(max_threads, static_cast<int>((N + 63) / 64)));
   BS::multi_future<void> multi_future =
     bs_thread_pool.submit_loop(0, thread_num, [=](int i) {
       unsigned int M_step_start = (i * N) / thread_num;
@@ -200,6 +203,7 @@ void __ggml_q4_0_8x8_q8_0_GEMM(const unsigned int M, const unsigned int N,
                                const unsigned int lda, const void *B,
                                const unsigned int ldb, float *C,
                                const unsigned int ldc) {
+  ThreadPoolManager::configure_for_llm();
   if (M == 1) { // GEMV
     __ggml_q4_0_8x8_q8_0_GEMM_GEMV(M, N, K, A, lda, B, ldb, C, ldc);
   } else { // GEMM
@@ -219,7 +223,8 @@ static inline void __ggml_q4_K_8x8_q8_K_GEMM_GEMV(
   ::quantize_row_q8_K(A, qa_data, K);
 
   auto &bs_thread_pool = ThreadPoolManager::getInstance();
-  int thread_num = bs_thread_pool.get_thread_count();
+  const int max_threads = static_cast<int>(bs_thread_pool.get_thread_count());
+  const int thread_num = std::max(1, std::min(max_threads, static_cast<int>((N + 63) / 64)));
   BS::multi_future<void> loop_future =
     bs_thread_pool.submit_loop(0, thread_num, [=](int i) {
       unsigned int M_step_start = (i * N) / thread_num;
@@ -264,7 +269,8 @@ static inline void __ggml_q4_K_8x8_q8_K_GEMM_GEMM(
   }
 
   ///@todo Dynamic thread-number selection for GEMM problem size
-  int thread_num = bs_thread_pool.get_thread_count();
+  const int max_threads = static_cast<int>(bs_thread_pool.get_thread_count());
+  const int thread_num = std::max(1, std::min(max_threads, static_cast<int>((N + 63) / 64)));
   BS::multi_future<void> multi_future =
     bs_thread_pool.submit_loop(0, thread_num, [=](int i) {
       unsigned int M_step_start = (i * N) / thread_num;
@@ -308,6 +314,7 @@ void __ggml_q4_K_8x8_q8_K_GEMM(const unsigned int M, const unsigned int N,
                                const unsigned int lda, const void *B,
                                const unsigned int ldb, float *C,
                                const unsigned int ldc) {
+  ThreadPoolManager::configure_for_llm();
   if (M == 1) { // GEMV
     __ggml_q4_K_8x8_q8_K_GEMM_GEMV(M, N, K, A, lda, B, ldb, C, ldc);
   } else { // GEMM
@@ -358,6 +365,7 @@ void __ggml_gemm_q6_K(const unsigned int M, const unsigned int N,
                       const unsigned int lda, const void *B,
                       const unsigned int ldb, float *C,
                       const unsigned int ldc) {
+  ThreadPoolManager::configure_for_llm();
   static constexpr const int32_t thread_count = 16;
 
   static constexpr const int32_t bs = 1;  // unused in ::ggml_vec_dot_q6_K_q8_K
