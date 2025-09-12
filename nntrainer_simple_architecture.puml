@@ -1,0 +1,80 @@
+@startuml NNtrainer_Simple_Architecture
+!theme aws-orange
+title NNtrainer Simplified Architecture Flow
+
+start
+
+partition "Application Layer" {
+  :Applications (MNIST, ResNet, VGG, YOLO);
+  :Development Tools;
+  :Platform Integration;
+}
+
+partition "API Layer" {
+  if (Platform?) then (C/C++)
+    :C API (CAPI);
+    :C++ API (CCAPI);
+  else (Android/Java)
+    :JNI API;
+  endif
+}
+
+partition "Core Engine" {
+  :Application Context;
+  :Core Engine;
+  :Model Management;
+}
+
+partition "Graph Layer" {
+  :Network Graph;
+  :Graph Core;
+  :Connections;
+}
+
+partition "Neural Network Layers" {
+  split
+    :Core Layers\n(Conv2D, FC, Pool);
+  split again
+    :Recurrent Layers\n(LSTM, GRU, RNN);
+  split again
+    :Mathematical Ops\n(Add, Mul, Sub);
+  split again
+    :Utility Layers\n(Reshape, Split);
+  end split
+}
+
+partition "Optimization" {
+  :Optimizers\n(Adam, AdamW, SGD);
+  :LR Schedulers;
+  :Training Strategies;
+}
+
+partition "Tensor Operations" {
+  split
+    :Tensor Core;
+  split again
+    :Memory Management;
+  split again
+    :Backend Support\n(CPU, OpenCL);
+  end split
+}
+
+partition "Data Pipeline" {
+  :Data Buffer;
+  :Data Producers;
+  :Data Iteration;
+}
+
+partition "External Integration" {
+  split
+    :NNStreamer;
+  split again
+    :TensorFlow Lite;
+  split again
+    :Platform APIs;
+  end split
+}
+
+stop
+
+@enduml
