@@ -1,0 +1,90 @@
+@startuml NNtrainer_Training_Sequence
+!theme aws-orange
+title NNtrainer Training Workflow Sequence
+
+actor "Application" as App
+participant "C API" as CAPI
+participant "NeuralNetwork" as NN
+participant "NetworkGraph" as Graph
+participant "LayerNode" as Layer
+participant "Tensor" as Tensor
+participant "Optimizer" as Opt
+participant "DataBuffer" as Data
+
+App -> CAPI: ml_train_model_construct()
+CAPI -> NN: NeuralNetwork::create()
+NN -> Graph: NetworkGraph::initialize()
+return graph created
+
+App -> CAPI: ml_train_layer_create()
+CAPI -> Layer: LayerNode::create(type, properties)
+Layer -> Layer: initialize layer weights
+return layer created
+
+App -> CAPI: ml_train_model_add()
+CAPI -> NN: addLayer(layer)
+NN -> Graph: addNode(layer_node)
+return layer added
+
+App -> CAPI: ml_train_optimizer_create()
+CAPI -> Opt: OptimizerBase::create(type)
+return optimizer created
+
+App -> CAPI: ml_train_model_set_optimizer()
+CAPI -> NN: setOptimizer(optimizer)
+return optimizer set
+
+App -> CAPI: ml_train_model_compile()
+CAPI -> NN: compile()
+NN -> Graph: topologicalSort()
+NN -> Graph: allocateMemory()
+NN -> Layer: initialize()
+Layer -> Tensor: allocate()
+return model compiled
+
+App -> CAPI: ml_train_dataset_create_from_file()
+CAPI -> Data: DataBuffer::create(file_path)
+return dataset created
+
+loop Training Loop
+    App -> CAPI: ml_train_model_train()
+    CAPI -> NN: train(dataset)
+    NN -> Data: getBatch()
+    Data -> Tensor: loadData()
+    return batch_data
+    
+    note right: Forward Pass
+    NN -> Graph: forward()
+    Graph -> Layer: forward()
+    Layer -> Tensor: compute()
+    return output
+    return forward_result
+    
+    note right: Loss Calculation
+    NN -> Layer: calculateLoss(output, target)
+    Layer -> Tensor: computeLoss()
+    return loss_value
+    
+    note right: Backward Pass
+    NN -> Graph: backward()
+    Graph -> Layer: backward()
+    Layer -> Tensor: computeGradients()
+    return gradients
+    return gradients_computed
+    
+    note right: Optimization
+    NN -> Opt: applyGradients()
+    Opt -> Tensor: updateWeight()
+    return weights_updated
+    
+    return training_step_complete
+end
+
+App -> CAPI: ml_train_model_run()
+CAPI -> NN: inference(input)
+NN -> Graph: forward()
+Graph -> Layer: forward()
+Layer -> Tensor: compute()
+return inference_result
+
+@enduml

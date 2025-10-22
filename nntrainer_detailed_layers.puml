@@ -1,0 +1,172 @@
+@startuml NNtrainer_Detailed_Layer_Architecture
+!theme aws-orange
+title NNtrainer Detailed Layer and Tensor Architecture
+
+package "Neural Network Layers" {
+  
+  package "Core Layers" {
+    [Convolution 2D] as Conv2D
+    [Fully Connected] as FC
+    [Pooling 2D] as Pool2D
+    [Dropout] as Dropout
+    [Activation] as Activation
+    [Input Layer] as Input
+  }
+  
+  package "Recurrent Layers" {
+    [LSTM] as LSTM
+    [GRU] as GRU
+    [RNN] as RNN
+    [LSTM Cell] as LSTMCell
+    [GRU Cell] as GRUCell
+  }
+  
+  package "Preprocessing Layers" {
+    [Preprocess Flip] as Flip
+    [Preprocess Translate] as Translate
+    [Preprocess L2Norm] as L2Norm
+    [Layer Normalization] as LayerNorm
+  }
+  
+  package "Mathematical Operations" {
+    [Add Layer] as Add
+    [Multiply Layer] as Multiply
+    [Subtract Layer] as Subtract
+    [Divide Layer] as Divide
+    [Power Layer] as Power
+  }
+  
+  package "Utility Layers" {
+    [Identity Layer] as Identity
+    [Reshape Layer] as Reshape
+    [Split Layer] as Split
+    [Concat Layer] as Concat
+    [Flatten Layer] as Flatten
+  }
+  
+  package "External Layers" {
+    [TensorFlow Lite] as TFLiteLayer
+    [NNStreamer Layer] as NNStreamerLayer
+    [Plugged Layer] as PluggedLayer
+  }
+  
+  package "OpenCL Accelerated" {
+    [CL Layers] as CLLayers
+  }
+  
+  package "Loss Functions" {
+    [Cross Entropy] as CrossEntropy
+    [Mean Squared Error] as MSE
+    [Custom Loss] as CustomLoss
+  }
+}
+
+package "Layer Framework" {
+  [Layer Base] as LayerBase
+  [Layer Context] as LayerContext
+  [Layer Node] as LayerNode
+  [Layer Developer Interface] as LayerDevel
+  [Common Properties] as CommonProps
+}
+
+package "Tensor Operations" {
+  
+  package "Tensor Core" {
+    [Tensor] as Tensor
+    [Tensor Base] as TensorBase
+    [Tensor Dimension] as TensorDim
+    [Variable Gradient] as VarGrad
+    [Weight] as Weight
+  }
+  
+  package "Data Types" {
+    [Float Tensor] as FloatTensor
+    [Half Tensor] as HalfTensor
+    [Integer Tensor] as IntTensor
+    [Character Tensor] as CharTensor
+    [Quantized Tensors] as QuantTensor
+  }
+  
+  package "Memory Management" {
+    [Memory Manager] as MemManager
+    [Memory Pool] as MemPool
+    [Cache Pool] as CachePool
+    [Memory Planner] as MemPlanner
+    [Swap Device] as SwapDevice
+  }
+  
+  package "Backend Operations" {
+    [CPU Backend] as CPUBackend
+    [OpenCL Operations] as CLOps
+    [NEON Optimizations] as NEON
+  }
+}
+
+package "Optimization Components" {
+  [Adam Optimizer] as Adam
+  [AdamW Optimizer] as AdamW
+  [SGD Optimizer] as SGD
+  [Learning Rate Schedulers] as LRSchedulers
+  [Optimizer Context] as OptContext
+}
+
+' Layer inheritance and relationships
+LayerBase <|-- Conv2D
+LayerBase <|-- FC
+LayerBase <|-- Pool2D
+LayerBase <|-- LSTM
+LayerBase <|-- GRU
+LayerBase <|-- Add
+LayerBase <|-- Identity
+
+' Layer framework relationships
+LayerBase --> LayerContext : uses
+LayerNode --> LayerBase : contains
+LayerDevel --> LayerBase : extends
+CommonProps --> LayerBase : configures
+
+' Tensor relationships
+TensorBase <|-- FloatTensor
+TensorBase <|-- HalfTensor
+TensorBase <|-- IntTensor
+TensorBase <|-- CharTensor
+TensorBase <|-- QuantTensor
+
+Tensor --> TensorBase : implements
+VarGrad --> Tensor : wraps
+Weight --> VarGrad : manages
+
+' Memory management relationships
+MemManager --> MemPool : manages
+MemManager --> CachePool : coordinates
+MemManager --> MemPlanner : uses
+MemManager --> SwapDevice : utilizes
+
+' Backend relationships
+Tensor --> CPUBackend : executes on
+Tensor --> CLOps : accelerates with
+CPUBackend --> NEON : optimizes with
+
+' Layer to tensor relationships
+Conv2D --> FloatTensor : operates on
+FC --> FloatTensor : computes with
+LSTM --> FloatTensor : processes
+Pool2D --> FloatTensor : reduces
+
+' Optimization relationships
+Adam --> Weight : updates
+AdamW --> Weight : updates
+SGD --> Weight : updates
+OptContext --> Adam : configures
+LRSchedulers --> OptContext : schedules
+
+' OpenCL acceleration
+CLLayers --> CLOps : uses
+CLLayers --> MemManager : optimizes
+
+' External integrations
+TFLiteLayer --> LayerBase : extends
+NNStreamerLayer --> LayerBase : extends
+PluggedLayer --> LayerDevel : implements
+
+@enduml

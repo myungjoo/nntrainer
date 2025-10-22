@@ -1,0 +1,149 @@
+@startmindmap NNtrainer_Architecture_Mindmap
+!theme aws-orange
+title NNtrainer Architecture Overview
+
+* NNtrainer\nOn-Device Training Framework
+** Application Layer
+*** Examples
+**** MNIST
+**** ResNet  
+**** VGG
+**** YOLO
+**** LLaMA
+*** Platform Integration
+**** Android
+**** Tizen Native
+**** Cross-platform
+** API Layer
+*** C API (CAPI)
+**** Training Interface
+**** Inference Interface
+**** Model Configuration
+*** C++ API (CCAPI)
+**** Object-Oriented Design
+**** Template Support
+**** RAII Management
+*** JNI API
+**** Java Native Interface
+**** Android Integration
+**** JVM Interoperability
+** Core Engine
+*** Application Context
+**** Configuration Management
+**** Resource Management
+**** Platform Abstraction
+*** Core Engine
+**** Execution Scheduling
+**** Memory Management
+**** Training Orchestration
+*** Model Management
+**** Neural Network Models
+**** Model Loading/Saving
+**** Serialization Support
+** Computational Graph
+*** Network Graph
+**** Graph Construction
+**** Topology Management
+**** Optimization Passes
+*** Graph Core
+**** Node Management
+**** Execution Flow Control
+**** Memory Planning
+*** Connections
+**** Edge Definition
+**** Data Flow Management
+**** Dependency Tracking
+** Neural Network Layers
+*** Core Layers
+**** Convolution 2D
+**** Fully Connected
+**** Pooling 2D
+**** Dropout
+**** Activation
+*** Recurrent Layers
+**** LSTM
+**** GRU
+**** RNN
+**** LSTM Cell
+*** Mathematical Operations
+**** Add/Subtract
+**** Multiply/Divide
+**** Power/Square Root
+*** Preprocessing Layers
+**** Flip Transform
+**** Translate Transform
+**** L2 Normalization
+*** External Layers
+**** TensorFlow Lite
+**** NNStreamer
+**** Plugged Layers
+*** OpenCL Acceleration
+**** GPU Accelerated Layers
+**** Memory Optimization
+**** Parallel Execution
+** Optimization
+*** Optimizers
+**** Adam Optimizer
+**** AdamW Optimizer
+**** SGD Optimizer
+*** Learning Rate Schedulers
+**** Constant Scheduler
+**** Exponential Decay
+**** Cosine Annealing
+**** Step Scheduler
+*** Training Strategies
+**** Dynamic Training
+**** Mixed Precision
+**** Transfer Learning
+** Tensor Operations
+*** Tensor Core
+**** Tensor Operations
+**** Broadcasting Support
+**** Reshape Operations
+**** Arithmetic Operations
+*** Data Types
+**** Float32/Float16
+**** Integer 4/8 bit
+**** Quantized Tensors
+**** Character Tensors
+*** Memory Management
+**** Memory Pools
+**** Cache Management
+**** Lazy Loading
+**** Swap Device Support
+*** Backend Support
+**** CPU Backend
+**** OpenCL Backend
+**** NEON Optimization
+**** Memory Mapping
+** Data Pipeline
+*** Data Buffer
+**** Buffer Management
+**** Batch Preparation
+**** Preprocessing
+**** Data Augmentation
+*** Data Producers
+**** File Producers
+**** Directory Scanning
+**** Random Data Generation
+**** Function Data Sources
+*** Data Iteration
+**** Queue Management
+**** Asynchronous Loading
+**** Threading Support
+**** Memory Efficiency
+** External Integrations
+*** NNStreamer Integration
+**** Tensor Filter Plugin
+**** Tensor Trainer Plugin
+**** Pipeline Integration
+*** TensorFlow Lite
+**** Model Import
+**** Inference Support
+**** Layer Compatibility
+*** Platform Support
+**** Android NDK
+**** Tizen Native APIs
+**** Linux/Windows Support
+
+@endmindmap
