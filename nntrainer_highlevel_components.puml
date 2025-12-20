@@ -1,0 +1,98 @@
+@startuml NNtrainer_High_Level_Components
+!theme aws-orange
+title NNtrainer High-Level Component Architecture
+
+package "Application Layer" {
+  [Applications] as Apps
+  [Development Tools] as Tools
+  [Platform Integration] as Platform
+}
+
+package "API Layer" {
+  [C API] as CAPI
+  [C++ API] as CCAPI
+  [JNI API] as JNI
+}
+
+package "Core Engine" {
+  [Application Context] as AppContext
+  [Core Engine] as Engine
+  [Model Management] as Models
+}
+
+package "Computational Graph" {
+  [Network Graph] as NetGraph
+  [Graph Core] as GraphCore
+  [Connections] as Connections
+}
+
+package "Neural Network Layers" {
+  [Layer Framework] as Layers
+  [Loss Functions] as Loss
+  [Layer Context] as LayerCtx
+}
+
+package "Optimization" {
+  [Optimizers] as Optimizers
+  [LR Schedulers] as Schedulers
+  [Training Strategies] as TrainingStrat
+}
+
+package "Tensor Operations" {
+  [Tensor Core] as TensorCore
+  [Memory Management] as MemMgmt
+  [Backend Support] as Backend
+}
+
+package "Data Pipeline" {
+  [Data Buffer] as DataBuffer
+  [Data Producers] as DataProducers
+  [Data Iteration] as DataIter
+}
+
+package "External Integrations" {
+  [NNStreamer] as NNStreamer
+  [TensorFlow Lite] as TFLite
+  [Platform APIs] as PlatformAPIs
+}
+
+' Relationships
+Apps --> CAPI : uses
+Apps --> CCAPI : uses
+Apps --> JNI : uses
+Tools --> CAPI : uses
+Platform --> JNI : uses
+
+CAPI --> AppContext : calls
+CCAPI --> AppContext : calls
+JNI --> AppContext : calls
+
+AppContext --> Engine : manages
+Engine --> Models : orchestrates
+Engine --> NetGraph : executes
+
+NetGraph --> GraphCore : builds
+GraphCore --> Connections : manages
+NetGraph --> Layers : instantiates
+
+Layers --> LayerCtx : uses
+Layers --> Loss : includes
+Layers --> TensorCore : operates on
+
+Engine --> Optimizers : applies
+Optimizers --> Schedulers : uses
+Optimizers --> TrainingStrat : implements
+
+TensorCore --> MemMgmt : uses
+TensorCore --> Backend : executes on
+MemMgmt --> Backend : allocates
+
+Engine --> DataBuffer : feeds from
+DataBuffer --> DataProducers : sources
+DataBuffer --> DataIter : iterates
+
+Layers --> NNStreamer : integrates
+Layers --> TFLite : compatible
+Platform --> PlatformAPIs : uses
+
+@enduml
