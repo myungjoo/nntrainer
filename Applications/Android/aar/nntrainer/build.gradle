@@ -1,0 +1,98 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// nntrainer Android library module.
+//
+// Produces nntrainer-<version>.aar containing:
+//   * AndroidManifest.xml (no permissions; pure native library wrapper)
+//   * lib/arm64-v8a/{libnntrainer.so, libccapi-nntrainer.so,
+//                    libcapi-nntrainer.so, libopenblas.so,
+//                    libomp.so, [libOpenCL.so]}
+//   * classes.jar containing com.samsung.nntrainer.NntrainerNative
+//
+// Build: from <repo-root>:
+//   ./tools/package_android.sh                      # produces libs/arm64-v8a/*.so
+//   cd Applications/Android/aar
+//   ./gradlew :nntrainer:assembleRelease            # produces nntrainer/build/outputs/aar/nntrainer-release.aar
+//
+// Consume: drop the AAR into the consumer app's libs/ and add to its
+// build.gradle:
+//   dependencies { implementation files('libs/nntrainer-release.aar') }
+
+plugins {
+    id 'com.android.library'
+}
+
+android {
+    namespace 'com.samsung.nntrainer'
+    compileSdk 33
+
+    defaultConfig {
+        minSdk 24
+        // Match jni/Application.mk APP_PLATFORM := android-33
+        // (commit "[Android][low] Application.mk: bump APP_PLATFORM 29 -> 33")
+        targetSdk 33
+
+        consumerProguardFiles 'consumer-rules.pro'
+
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    sourceSets {
+        main {
+            jniLibs.srcDirs = ['src/main/jniLibs']
+        }
+    }
+
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = false
+        }
+    }
+}
+
+// Stage the .so set produced by tools/package_android.sh into this
+// module's jniLibs before AGP packs it into the AAR.
+//
+// Source path resolution, in order:
+//   1. <repo-root>/libs/arm64-v8a/    (populated by the
+//                                      `cp -R builddir/android_build_result
+//                                      /lib/arm64-v8a/* libs/arm64-v8a`
+//                                      step in .github/workflows/android.yml,
+//                                      and by integrators following the
+//                                      README's manual flow)
+//   2. <repo-root>/builddir/android_build_result/lib/arm64-v8a/
+//                                     (the canonical install path that
+//                                      tools/package_android.sh creates;
+//                                      lets the AAR build work right after
+//                                      a fresh package_android.sh without
+//                                      requiring the explicit `cp` step)
+//
+// If neither exists the task is a no-op and the resulting AAR will have
+// an empty lib/arm64-v8a/. We do NOT fail the gradle build here so that
+// developers iterating on the Java side without a fresh native build
+// still get a valid (just-empty-payload) AAR for compile-only consumers.
+tasks.register('copyNntrainerJniLibs', Copy) {
+    def repoRoot = file("${rootProject.projectDir}/../../..")
+    def libsDir = new File(repoRoot, 'libs/arm64-v8a')
+    def builddirOut = new File(repoRoot,
+        'builddir/android_build_result/lib/arm64-v8a')
+    def srcDir = libsDir.exists() ? libsDir : builddirOut
+    onlyIf { srcDir.exists() }
+    from srcDir
+    into 'src/main/jniLibs/arm64-v8a'
+    include '**/*.so'
+}
+preBuild.dependsOn 'copyNntrainerJniLibs'

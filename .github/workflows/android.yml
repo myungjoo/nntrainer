@@ -55,3 +55,25 @@ jobs:
         ndk-build NDK_PROJECT_PATH=./ APP_BUILD_SCRIPT=./Android.mk NDK_APPLICATION_MK=./Application.mk
         popd
         echo "::endgroup::"
+    - name: Setup Java for AAR build
+      if: env.rebuild == '1'
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '11'
+    - name: Build nntrainer Android AAR
+      if: env.rebuild == '1'
+      run: |
+        echo "::group::nntrainer-aar :nntrainer:assembleRelease"
+        pushd Applications/Android/aar
+        chmod +x ./gradlew
+        ./gradlew :nntrainer:assembleRelease --no-daemon --stacktrace
+        popd
+        echo "::endgroup::"
+    - name: Upload nntrainer AAR artifact
+      if: env.rebuild == '1'
+      uses: actions/upload-artifact@v4
+      with:
+        name: nntrainer-aar-${{ matrix.cl_options }}
+        path: Applications/Android/aar/nntrainer/build/outputs/aar/*.aar
+        if-no-files-found: error

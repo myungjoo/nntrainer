@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// nntrainer Android AAR — minimal library-module skeleton.
+// See README.md for the full motivation and consumption model.
+
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        google()
+        mavenCentral()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = "nntrainer-aar"
+include ':nntrainer'

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SPDX-License-Identifier: Apache-2.0
+
+  nntrainer-aar manifest stub. The library declares no permissions and
+  no components; consumers are expected to load the native library from
+  their own application code via NntrainerNative.ensureLoaded().
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />

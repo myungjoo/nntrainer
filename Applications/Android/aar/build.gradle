@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// Top-level build file for the nntrainer-aar gradle build.
+// Per-module configuration lives in nntrainer/build.gradle.
+//
+// AGP 7.4.1 + Gradle 7.5 to match the other Applications/Android/* sample
+// apps (ResnetJNI, PicoGPTJNI, NNDetector) so the same JDK 11 toolchain
+// works across the repo.
+
+plugins {
+    id 'com.android.library' version '7.4.1' apply false
+}
