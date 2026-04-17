@@ -186,11 +186,21 @@ LOCAL_C_INCLUDES    := @MESON_NNTRAINER_INCS@ @MESON_ML_API_COMMON_ROOT@/include
 LOCAL_EXPORT_C_INCLUDES  := $(LOCAL_C_INCLUDES)
 
 LOCAL_ARM_NEON      := true
-LOCAL_CFLAGS        += -pthread -fexceptions -fopenmp -static-openmp @MESON_CFLAGS@ @ML_API_COMMON@
+# Use dynamic libomp instead of -static-openmp. Static OpenMP linked
+# into a JNI-loaded .so creates a private OMP runtime that initializes
+# *after* ART has already spawned dozens of threads (GC, JIT, finalizer,
+# binder); those pre-existing threads then have no per-thread OMP state
+# and call_once / TLS races inside __kmp_get_global_thread_id_reg are
+# the typical first crash. Worse, when two .so files in the same APK
+# each statically link libomp, two parallel OMP runtimes contend for
+# the same pthread keys. Dynamic libomp.so bundled into jniLibs avoids
+# both issues. tools/package_android.sh stages libomp.so from the NDK
+# toolchain into android_build_result/lib/<abi>/.
+LOCAL_CFLAGS        += -pthread -fexceptions -fopenmp @MESON_CFLAGS@ @ML_API_COMMON@
 LOCAL_CXXFLAGS      += -std=c++17 -frtti -fexceptions @ML_API_COMMON@ @MESON_CXXFLAGS@
 LOCAL_MODULE_TAGS   := optional
 
-LOCAL_LDLIBS        := -llog -landroid -fopenmp -static-openmp
+LOCAL_LDLIBS        := -llog -landroid -fopenmp
 LOCAL_LDFLAGS 	    += "-Wl,-z,max-page-size=16384"
 # Hide the dynsym symbols of every static archive linked into this .so
 # (iniparser, openblas, clblast, tensorflow-lite). In an Android APK
@@ -224,11 +234,12 @@ LOCAL_C_INCLUDES    := @MESON_CCAPI_NNTRAINER_INCS@ @MESON_ML_API_COMMON_ROOT@/i
 LOCAL_EXPORT_C_INCLUDES := $(LOCAL_C_INCLUDES)
 
 LOCAL_ARM_NEON      := true
-LOCAL_CFLAGS        += -pthread -fexceptions -fopenmp -static-openmp @MESON_CFLAGS@ @ML_API_COMMON@
+# Use dynamic libomp; see libnntrainer block above for rationale.
+LOCAL_CFLAGS        += -pthread -fexceptions -fopenmp @MESON_CFLAGS@ @ML_API_COMMON@
 LOCAL_CXXFLAGS      += -std=c++17 -frtti -fexceptions @ML_API_COMMON@ -DVERSION_MAJOR=@VERSION_MAJOR@ -DVERSION_MINOR=@VERSION_MINOR@ -DVERSION_MICRO=@VERSION_MICRO@ @MESON_CXXFLAGS@
 LOCAL_MODULE_TAGS   := optional
 
-LOCAL_LDLIBS        := -llog -landroid -fopenmp -static-openmp
+LOCAL_LDLIBS        := -llog -landroid -fopenmp
 LOCAL_LDFLAGS 	    += "-Wl,-z,max-page-size=16384"
 # Hide static-archive symbols from this .so's dynsym (see libnntrainer
 # block above for rationale). Note: --exclude-libs only affects archive
@@ -248,11 +259,12 @@ LOCAL_C_INCLUDES    := @MESON_CAPI_NNTRAINER_INCS@
 LOCAL_EXPORT_C_INCLUDES := $(LOCAL_C_INCLUDES)
 
 LOCAL_ARM_NEON      := true
-LOCAL_CFLAGS        += -pthread -fexceptions -fopenmp -static-openmp @MESON_CFLAGS@ @ML_API_COMMON@
+# Use dynamic libomp; see libnntrainer block above for rationale.
+LOCAL_CFLAGS        += -pthread -fexceptions -fopenmp @MESON_CFLAGS@ @ML_API_COMMON@
 LOCAL_CXXFLAGS      += -std=c++17 -frtti -fexceptions @ML_API_COMMON@ @MESON_CXXFLAGS@
 LOCAL_MODULE_TAGS   := optional
 
-LOCAL_LDLIBS        := -llog -landroid -fopenmp -static-openmp
+LOCAL_LDLIBS        := -llog -landroid -fopenmp
 LOCAL_LDFLAGS 	    += "-Wl,-z,max-page-size=16384"
 # Hide static-archive symbols from this .so's dynsym (see libnntrainer
 # block above for rationale).

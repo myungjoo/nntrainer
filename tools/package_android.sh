@@ -88,6 +88,31 @@ fi
 pushd builddir
 ninja install
 
+# Stage dynamic libomp.so from the NDK toolchain
+#
+# nntrainer's Android .so files are compiled with -fopenmp (no longer
+# -static-openmp — see jni/Android.mk.in). The dynamic dependency on
+# libomp.so must be satisfied at runtime by a copy bundled inside the
+# APK's lib/<abi>/ directory; the Android per-app linker namespace
+# cannot reach the NDK or system copy. Locate libomp.so for arm64 from
+# the active NDK and stage it into the install lib dir before tarring.
+NDK_ROOT="${ANDROID_NDK_ROOT:-${ANDROID_NDK_HOME:-${ANDROID_NDK:-${NDK_ROOT}}}}"
+INSTALL_LIB_ARM64="$(pwd)/android_build_result/lib/arm64-v8a"
+if [ -n "$NDK_ROOT" ] && [ -d "$INSTALL_LIB_ARM64" ]; then
+    LIBOMP=$(find "$NDK_ROOT" -path "*aarch64-linux-android/libomp.so" 2>/dev/null | head -n 1)
+    if [ -z "$LIBOMP" ]; then
+        LIBOMP=$(find "$NDK_ROOT" -name libomp.so -path "*aarch64*" 2>/dev/null | head -n 1)
+    fi
+    if [ -n "$LIBOMP" ]; then
+        echo "[package_android] staging libomp.so from $LIBOMP"
+        cp "$LIBOMP" "$INSTALL_LIB_ARM64/"
+    else
+        echo "[package_android] WARN: libomp.so not found under NDK_ROOT=$NDK_ROOT; APK consumers will fail to dlopen libnntrainer.so."
+    fi
+else
+    echo "[package_android] WARN: NDK_ROOT not set; skipping libomp.so staging."
+fi
+
 # 16KB-page alignment audit
 #
 # nntrainer's own .so files are linked with -Wl,-z,max-page-size=16384
