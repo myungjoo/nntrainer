@@ -32,7 +32,7 @@ PICOGPT_DIR = .
 
 
 LOCAL_ARM_NEON := true
-LOCAL_CFLAGS += -std=c++17 -Ofast -mcpu=cortex-a53 -Ilz4-nougat/lib
+LOCAL_CFLAGS += -std=c++17 -O3 -Ilz4-nougat/lib
 LOCAL_LDFLAGS += -Llz4-nougat/lib/obj/local/$(TARGET_ARCH_ABI)/
 LOCAL_CXXFLAGS += -std=c++17 -frtti -fexceptions
 LOCAL_CFLAGS += -pthread -fexceptions
