@@ -192,6 +192,16 @@ LOCAL_MODULE_TAGS   := optional
 
 LOCAL_LDLIBS        := -llog -landroid -fopenmp -static-openmp
 LOCAL_LDFLAGS 	    += "-Wl,-z,max-page-size=16384"
+# Hide the dynsym symbols of every static archive linked into this .so
+# (iniparser, openblas, clblast, tensorflow-lite). In an Android APK
+# process every native lib uses RTLD_GLOBAL-like binding by default, so
+# an unhidden internal helper from openblas/iniparser can collide with
+# a same-named symbol from another SDK loaded by the host app
+# (Firebase, OpenCV, TFLite, MediaPipe, ...). --exclude-libs,ALL is the
+# minimum-risk way to scope the dynsym to nntrainer's own translation
+# units without per-symbol annotation. Linux/Tizen unaffected because
+# nothing else in those processes shares the linker namespace.
+LOCAL_LDFLAGS       += -Wl,--exclude-libs,ALL
 
 LOCAL_STATIC_LIBRARIES += iniparser openblas
 
@@ -220,6 +230,11 @@ LOCAL_MODULE_TAGS   := optional
 
 LOCAL_LDLIBS        := -llog -landroid -fopenmp -static-openmp
 LOCAL_LDFLAGS 	    += "-Wl,-z,max-page-size=16384"
+# Hide static-archive symbols from this .so's dynsym (see libnntrainer
+# block above for rationale). Note: --exclude-libs only affects archive
+# (.a) inputs, so libnntrainer.so symbols pulled in via LOCAL_SHARED_-
+# LIBRARIES remain re-exportable.
+LOCAL_LDFLAGS       += -Wl,--exclude-libs,ALL
 
 LOCAL_SHARED_LIBRARIES += nntrainer
 
@@ -239,6 +254,9 @@ LOCAL_MODULE_TAGS   := optional
 
 LOCAL_LDLIBS        := -llog -landroid -fopenmp -static-openmp
 LOCAL_LDFLAGS 	    += "-Wl,-z,max-page-size=16384"
+# Hide static-archive symbols from this .so's dynsym (see libnntrainer
+# block above for rationale).
+LOCAL_LDFLAGS       += -Wl,--exclude-libs,ALL
 
 LOCAL_SHARED_LIBRARIES += ccapi-nntrainer nntrainer ml-api-inference
 
