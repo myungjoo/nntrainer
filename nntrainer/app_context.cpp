@@ -121,7 +121,21 @@ constexpr const char *DEFAULT_CONF_PATH = NNTRAINER_CONF_PATH;
 constexpr const char *DEFAULT_CONF_PATH = "/etc/nntrainer.ini";
 #endif
 
-constexpr const char *getConfPath() { return DEFAULT_CONF_PATH; }
+/**
+ * @brief Resolve the nntrainer.ini path.
+ *        Precedence: env NNTRAINER_CONF_PATH > compile-time default.
+ *        On Android the compile-time default (/etc/nntrainer.ini) is
+ *        unreachable from the app sandbox, so an integrator may set
+ *        NNTRAINER_CONF_PATH from JNI (setenv) before any nntrainer
+ *        API call to point at e.g. the app's filesDir.
+ */
+static std::string getConfPath() {
+  const char *env_path = std::getenv("NNTRAINER_CONF_PATH");
+  if (env_path != nullptr && env_path[0] != '\0') {
+    return std::string(env_path);
+  }
+  return std::string(DEFAULT_CONF_PATH);
+}
 
 namespace nntrainer {
 
@@ -133,11 +147,14 @@ namespace {
  * @return std::string plugin path
  */
 std::string getConfig(const std::string &key) {
-  std::string conf_path{getConfPath()};
+  std::string conf_path = getConfPath();
 
   ml_logd("%s conf path: %s", func_tag.c_str(), conf_path.c_str());
   if (!isFileExist(conf_path)) {
-    ml_logw(
+    // On Android the default /etc/nntrainer.ini is unreachable; demote
+    // the message to debug so it is not noise. Integrators that *do*
+    // want plugin discovery should set NNTRAINER_CONF_PATH explicitly.
+    ml_logd(
       "%s conf path does not exist, skip getting plugin path from the conf",
       func_tag.c_str());
     return std::string();
