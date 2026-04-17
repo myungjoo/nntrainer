@@ -16,6 +16,30 @@
 #include "picogpt_jni.h"
 #include "picogpt.h"
 #include <android/bitmap.h>
+#include <app_context.h>
+
+namespace {
+JavaVM *g_jvm = nullptr;
+} // anonymous namespace
+
+/**
+ * Cache the JavaVM and force AppContext::Global() initialization at
+ * library-load time. Without this, the first JVM thread to call into
+ * nntrainer races the std::call_once that registers ~100 layer/optimizer
+ * factories — a race that is benign on Linux (single-threaded main()
+ * triggers init) but exposed under ART where dozens of pre-existing
+ * threads may concurrently enter the .so.
+ */
+extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void * /*reserved*/) {
+  g_jvm = vm;
+  try {
+    (void)nntrainer::AppContext::Global();
+  } catch (...) {
+    // AppContext::initialize() is noexcept today; defensive catch so
+    // JNI_OnLoad never propagates an exception across the JNI boundary.
+  }
+  return JNI_VERSION_1_6;
+}
 
 int cur_epoch = 0;
 float val_accu = 0.0;
