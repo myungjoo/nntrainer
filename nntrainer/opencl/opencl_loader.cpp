@@ -61,6 +61,30 @@ bool LoadOpenCL() {
     DynamicLibraryLoader::loadLibrary(kClLibName, RTLD_NOW | RTLD_LOCAL);
   if (libopencl) {
     LoadOpenCLFunctions(libopencl);
+
+    // On Android, libOpenCL.so often loads via a vendor stub even when
+    // no usable GPU/ICD is actually available — and the GPU vendor blob
+    // may crash the calling process the first time a real OpenCL call
+    // is made. Probe clGetPlatformIDs once here, while we still have a
+    // single-threaded init context, so a "lib loaded but unusable"
+    // device degrades cleanly to the CPU path instead of crashing
+    // later inside ContextManager::CreateDefaultGPUDevice().
+    if (clGetPlatformIDs == nullptr) {
+      ml_loge("OpenCL library loaded but clGetPlatformIDs symbol is missing; "
+              "marking OpenCL unavailable and falling back to CPU.");
+      opencl_init_failed = true;
+      return false;
+    }
+    cl_uint num_platforms = 0;
+    cl_int err = clGetPlatformIDs(0, nullptr, &num_platforms);
+    if (err != CL_SUCCESS || num_platforms == 0) {
+      ml_logw("OpenCL library is present but no usable platform was "
+              "enumerated (err=%d, num_platforms=%u). Falling back to CPU.",
+              err, num_platforms);
+      opencl_init_failed = true;
+      return false;
+    }
+
     open_cl_initialized = true;
     return true;
   }
