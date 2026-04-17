@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+# NOTE: this script downloads a prebuilt TensorFlow Lite .so set from
+# nnstreamer-android-resource. The bundled .so files MUST have ELF
+# LOAD-segment alignment >= 16384 (i.e., be linked with
+# -Wl,-z,max-page-size=16384) to remain loadable on 16KB-page Android
+# devices (Pixel 8+, etc.) alongside nntrainer's own .so files.
+# tools/package_android.sh runs an alignment audit after install and
+# warns on mismatch.
 VERSION=$1
 TARGET=$2
 

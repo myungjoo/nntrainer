@@ -9,6 +9,14 @@
 # @author Jihoon lee <jhoon.it.lee@samsung.com>
 #
 # usage: ./prepare_openblas.sh target
+#
+# NOTE: this script downloads a prebuilt OpenBLAS .so set from
+# nnstreamer-android-resource. The bundled .so files MUST have ELF
+# LOAD-segment alignment >= 16384 (i.e., be linked with
+# -Wl,-z,max-page-size=16384) to remain loadable on 16KB-page Android
+# devices (Pixel 8+, etc.) alongside nntrainer's own .so files.
+# tools/package_android.sh runs an alignment audit after install and
+# warns on mismatch.
 
 set -e
 TARGET=$1

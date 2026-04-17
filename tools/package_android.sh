@@ -88,6 +88,54 @@ fi
 pushd builddir
 ninja install
 
+# 16KB-page alignment audit
+#
+# nntrainer's own .so files are linked with -Wl,-z,max-page-size=16384
+# (see jni/Android.mk.in). On Pixel 8+ and other devices that have
+# moved to 16KB kernel pages, every .so loaded into the same process —
+# *including* prebuilt dependencies (libopenblas.so, libOpenCL.so,
+# libomp.so, libc++_shared.so, ...) — must also have LOAD segments
+# aligned to >= 16384 or the dynamic linker rejects the lib at dlopen
+# time.
+#
+# Walk the packaged lib/<abi>/ directory and warn for any .so whose
+# program-header alignment is < 16384. We warn rather than fail because
+# 4KB-page devices remain functional, but on a 16KB-page device the
+# missing alignment causes a hard load failure that surfaces only on
+# user devices.
+PACKAGE_LIB_DIR="$(pwd)/android_build_result/lib"
+if [ -d "$PACKAGE_LIB_DIR" ]; then
+    READELF=""
+    for candidate in llvm-readelf readelf; do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            READELF="$candidate"
+            break
+        fi
+    done
+    if [ -n "$READELF" ]; then
+        echo "[package_android] auditing .so LOAD-segment alignment (>=0x4000 = 16KB)"
+        find "$PACKAGE_LIB_DIR" -name "*.so" -type f | while read -r so; do
+            # Extract the largest Align value among PT_LOAD entries.
+            # Format of `readelf -lW`: lines containing "LOAD" with
+            # the alignment as the last field, e.g.
+            #   LOAD  0x000000 0x... 0x... 0x... 0x... R E 0x4000
+            max_align=$($READELF -lW "$so" 2>/dev/null \
+                | awk '/^[[:space:]]*LOAD/ { print $NF }' \
+                | sort -u | tail -n 1)
+            if [ -z "$max_align" ]; then
+                continue
+            fi
+            # Convert hex to decimal for comparison
+            align_dec=$((max_align))
+            if [ "$align_dec" -lt 16384 ]; then
+                echo "[package_android] WARN: $so has LOAD align=$max_align (<0x4000); will fail dlopen on 16KB-page Android devices."
+            fi
+        done
+    else
+        echo "[package_android] WARN: neither llvm-readelf nor readelf found; skipping 16KB-page alignment audit."
+    fi
+fi
+
 tar -czvf $TARGET/nntrainer_for_android.tar.gz --directory=android_build_result .
 
 popd
