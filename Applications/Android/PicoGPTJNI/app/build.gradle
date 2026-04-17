@@ -26,7 +26,38 @@ android {
         targetCompatibility JavaVersion.VERSION_1_8
     }
     namespace 'com.applications.picogptjni'
+
+    // Restrict APK to arm64-v8a — that is the only ABI nntrainer is
+    // built for in tools/package_android.sh.
+    ndk {
+        abiFilters 'arm64-v8a'
+    }
+
+    // Explicit jniLibs source dir + disable legacy packaging so .so
+    // files are loaded from inside the APK instead of being extracted.
+    sourceSets {
+        main {
+            jniLibs.srcDirs = ['src/main/jniLibs']
+        }
+    }
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = false
+        }
+    }
 }
+
+// Pull the nntrainer .so set built by tools/package_android.sh into the
+// APK's jniLibs before assembly. See ResnetJNI/app/build.gradle for the
+// expected source layout.
+tasks.register('copyNntrainerJniLibs', Copy) {
+    def srcDir = file("${rootProject.projectDir}/../../../libs/arm64-v8a")
+    onlyIf { srcDir.exists() }
+    from srcDir
+    into 'src/main/jniLibs/arm64-v8a'
+    include '**/*.so'
+}
+preBuild.dependsOn 'copyNntrainerJniLibs'
 
 dependencies {
 

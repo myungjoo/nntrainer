@@ -57,7 +57,35 @@ android {
 	    path 'src/main/jni/Android.mk'
 	}
     }
+
+    // Explicit jniLibs source dir + disable legacy packaging. The kotlin
+    // sample also uses externalNativeBuild ndkBuild for its own _jni.so,
+    // but transitive dependencies (libnntrainer.so, libccapi-nntrainer.so,
+    // libopenblas.so, libomp.so, ...) still need to be staged into
+    // jniLibs from the top-level libs/arm64-v8a output.
+    sourceSets {
+        main {
+            jniLibs.srcDirs = ['src/main/jniLibs']
+        }
+    }
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = false
+        }
+    }
 }
+
+// Pull the nntrainer .so set built by tools/package_android.sh into the
+// APK's jniLibs before assembly. See ResnetJNI/app/build.gradle for the
+// expected source layout.
+tasks.register('copyNntrainerJniLibs', Copy) {
+    def srcDir = file("${rootProject.projectDir}/../../../libs/arm64-v8a")
+    onlyIf { srcDir.exists() }
+    from srcDir
+    into 'src/main/jniLibs/arm64-v8a'
+    include '**/*.so'
+}
+preBuild.dependsOn 'copyNntrainerJniLibs'
 
 dependencies {
 

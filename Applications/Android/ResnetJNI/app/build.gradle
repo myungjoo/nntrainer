@@ -26,7 +26,48 @@ android {
         targetCompatibility JavaVersion.VERSION_1_8
     }
     namespace 'com.applications.resnetjni'
+
+    // Restrict APK to arm64-v8a — that is the only ABI nntrainer is
+    // built for in tools/package_android.sh, and shipping other ABIs
+    // would result in System.loadLibrary() picking an empty/missing
+    // variant on, e.g., armeabi-v7a devices.
+    ndk {
+        abiFilters 'arm64-v8a'
+    }
+
+    // Explicitly declare the jniLibs source dir (this is gradle's default,
+    // restated for documentation) and disable legacy packaging so the
+    // .so files are loaded from inside the APK instead of being extracted
+    // to the app data dir.
+    sourceSets {
+        main {
+            jniLibs.srcDirs = ['src/main/jniLibs']
+        }
+    }
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = false
+        }
+    }
 }
+
+// Pull the nntrainer .so set built by tools/package_android.sh into the
+// APK's jniLibs before assembly. Layout produced by package_android.sh:
+//   <repo-root>/libs/arm64-v8a/{libnntrainer.so, libccapi-nntrainer.so,
+//                               libcapi-nntrainer.so, libopenblas.so,
+//                               libomp.so, ...}
+// Without this copy the APK's lib/arm64-v8a/ would be missing the
+// transitive deps and System.loadLibrary("resnet_jni") would fail with
+// "cannot locate symbol" or "library not found" at app start, since the
+// Android linker namespace cannot reach /system/lib64 for these libs.
+tasks.register('copyNntrainerJniLibs', Copy) {
+    def srcDir = file("${rootProject.projectDir}/../../../libs/arm64-v8a")
+    onlyIf { srcDir.exists() }
+    from srcDir
+    into 'src/main/jniLibs/arm64-v8a'
+    include '**/*.so'
+}
+preBuild.dependsOn 'copyNntrainerJniLibs'
 
 dependencies {
 
