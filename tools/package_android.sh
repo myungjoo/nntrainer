@@ -113,6 +113,40 @@ else
     echo "[package_android] WARN: NDK_ROOT not set; skipping libomp.so staging."
 fi
 
+# Single libc++_shared.so assertion
+#
+# APP_STL := c++_shared (jni/Application.mk) is the recommended STL
+# choice for multi-.so projects on Android, but it has a sharp edge:
+# every native .so in the APK process must agree on a single
+# libc++_shared.so instance. If two SDKs in the same process each
+# bundle their own copy, the linker picks one as canonical, and any
+# class layout difference between the picked copy and the version
+# nntrainer was compiled against silently breaks RTTI, exception
+# unwinding, and dynamic_cast across .so boundaries (e.g., a
+# `throw std::runtime_error(...)` from inside libnntrainer.so will
+# *not* be caught by an obvious `catch (std::exception&)` in the
+# consumer if the typeinfo objects differ).
+#
+# We cannot enforce single-copy on the consumer side from here, but
+# we *can* enforce it within nntrainer's own Android package: if
+# ndk-build ever staged more than one libc++_shared.so under
+# android_build_result/lib/, fail the package step. Common causes
+# would be a third-party prebuilt that bundled its own STL copy
+# leaking into the install set.
+if [ -d "$INSTALL_LIB_ARM64" ] || [ -d "$(pwd)/android_build_result/lib" ]; then
+    CXX_SHARED_COUNT=$(find "$(pwd)/android_build_result/lib" -name "libc++_shared.so" -type f 2>/dev/null | wc -l)
+    if [ "$CXX_SHARED_COUNT" -gt 1 ]; then
+        echo "[package_android] ERROR: found $CXX_SHARED_COUNT libc++_shared.so copies in android_build_result/lib/:"
+        find "$(pwd)/android_build_result/lib" -name "libc++_shared.so" -type f 2>/dev/null
+        echo "[package_android] Multiple libc++_shared.so copies in one APK process cause RTTI/exception"
+        echo "[package_android] breakage across .so boundaries. Refusing to package."
+        exit 1
+    fi
+    if [ "$CXX_SHARED_COUNT" -eq 1 ]; then
+        echo "[package_android] OK: exactly 1 libc++_shared.so staged."
+    fi
+fi
+
 # 16KB-page alignment audit
 #
 # nntrainer's own .so files are linked with -Wl,-z,max-page-size=16384
