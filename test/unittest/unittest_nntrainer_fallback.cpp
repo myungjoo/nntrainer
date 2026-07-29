@@ -1288,7 +1288,7 @@ TEST(nntrainer_fallback_kleidiai, matmul_mxn_mxk_nxk_f32_qa8dx_qs4cx) {
   nntrainer::__fallback_quant_qa8dx_f32(m, k, lhs_f32.data(), lhs_qa8dx.data());
 
   // Quantize RHS
-  std::vector<uint8_t> rhs_qs4cx((n * (k + 1) / 2), 0);
+  std::vector<uint8_t> rhs_qs4cx((n * ((k + 1) / 2)), 0);
   std::vector<float> rhs_scales_f32(n, 0.0f);
   nntrainer::__fallback_quant_nxk_qs4cx_f32(
     n, k, rhs_f32.data(), rhs_qs4cx.data(), rhs_scales_f32.data());
@@ -1337,7 +1337,7 @@ TEST(nntrainer_fallback_kleidiai, matmul_mxn_mxk_kxn_f32_qa8dx_qs4cx) {
   nntrainer::__fallback_quant_qa8dx_f32(m, k, lhs_f32.data(), lhs_qa8dx.data());
 
   // Quantize RHS
-  std::vector<uint8_t> rhs_qs4cx((k * (n + 1) / 2), 0);
+  std::vector<uint8_t> rhs_qs4cx((k * ((n + 1) / 2)), 0);
   std::vector<float> rhs_scales_f32(n, 0.0f);
   nntrainer::__fallback_quant_kxn_qs4cx_f32(
     n, k, rhs_f32.data(), rhs_qs4cx.data(), rhs_scales_f32.data());
@@ -1395,7 +1395,7 @@ TEST(nntrainer_fallback_kleidiai,
   nntrainer::__fallback_quant_qa8dx_f32(m, k, lhs_f32.data(), lhs_qa8dx.data());
 
   // Quantize RHS
-  std::vector<uint8_t> rhs_qs4cx((n * (k + 1) / 2), 0);
+  std::vector<uint8_t> rhs_qs4cx((n * ((k + 1) / 2)), 0);
   std::vector<float> rhs_scales_f32(n, 0.0f);
   nntrainer::__fallback_quant_nxk_qs4cx_f32(
     n, k, rhs_f32.data(), rhs_qs4cx.data(), rhs_scales_f32.data());
@@ -1459,7 +1459,7 @@ TEST(nntrainer_fallback_kleidiai,
   nntrainer::__fallback_quant_qa8dx_f32(m, k, lhs_f32.data(), lhs_qa8dx.data());
 
   // Quantize RHS
-  std::vector<uint8_t> rhs_qs4cx((k * (n + 1) / 2), 0);
+  std::vector<uint8_t> rhs_qs4cx((k * ((n + 1) / 2)), 0);
   std::vector<float> rhs_scales_f32(n, 0.0f);
   nntrainer::__fallback_quant_kxn_qs4cx_f32(
     n, k, rhs_f32.data(), rhs_qs4cx.data(), rhs_scales_f32.data());
@@ -1517,7 +1517,7 @@ static void verify_dequant_nxk_qs4cx(size_t n, size_t k) {
   std::vector<float> rhs_f32 =
     generate_random_vector<float>(n * k, -10.0f, 10.0f);
 
-  const size_t rhs_qs4cx_size = n * (k + 1) / 2;
+  const size_t rhs_qs4cx_size = n * ((k + 1) / 2);
   std::vector<uint8_t> rhs_qs4cx(rhs_qs4cx_size, 0);
   std::vector<float> rhs_scales_f32(n, 0.0f);
   nntrainer::__fallback_quant_nxk_qs4cx_f32(
@@ -1541,7 +1541,7 @@ static void verify_dequant_kxn_qs4cx(size_t n, size_t k) {
   std::vector<float> rhs_f32 =
     generate_random_vector<float>(n * k, -10.0f, 10.0f);
 
-  const size_t rhs_qs4cx_size = k * (n + 1) / 2;
+  const size_t rhs_qs4cx_size = k * ((n + 1) / 2);
   std::vector<uint8_t> rhs_qs4cx(rhs_qs4cx_size, 0);
   std::vector<float> rhs_scales_f32(n, 0.0f);
   nntrainer::__fallback_quant_kxn_qs4cx_f32(
