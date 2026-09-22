@@ -20,9 +20,9 @@
 #include <tuple>
 #include <vector>
 #if defined(__linux__) || defined(__ANDROID__)
-#include <csetjmp>
-#include <csignal>
 #include <cstring>
+#include <setjmp.h>
+#include <signal.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #endif
@@ -956,9 +956,10 @@ TEST(nntrainer_cpu_backend_standalone, gemm_benchmark_comparison_1x3072x512) {
  * sizes used below, so the gemv result can be compared against a float
  * reference without tolerating rounding noise. No value is zero, so a dropped
  * or misplaced tail element always changes the result.
- * @note Exactness holds because every product is a multiple of 0.125 with
- * |product| <= 1.875; raising N (or alpha) past |result| = 256 would start
- * rounding the fp16 store and invalidate the tight tolerance.
+ * @note Exactness holds because every product is a multiple of 0.125 and
+ * small (|product| <= 1.875 at alpha = 1, <= 3.75 at alpha = 2, where the
+ * kernel scales X in fp16 first); raising N or alpha past |result| = 256 would
+ * start rounding the fp16 store and invalidate the tight tolerance.
  */
 static void fill_gemv_operands(_FP16 *A, _FP16 *X, unsigned int M,
                                unsigned int N) {
@@ -1077,8 +1078,9 @@ TEST(nntrainer_cpu_backend_standalone, hgemv_tail_does_not_read_past_operands) {
   for (unsigned int N : {13u, 14u, 15u}) {
     GuardedFP16Buffer a_buf(M * N);
     GuardedFP16Buffer x_buf(N);
-    ASSERT_NE(a_buf.data(), nullptr);
-    ASSERT_NE(x_buf.data(), nullptr);
+    if (a_buf.data() == nullptr || x_buf.data() == nullptr) {
+      GTEST_SKIP() << "mmap/mprotect unavailable";
+    }
 
     std::vector<_FP16> Y(M, static_cast<_FP16>(1.f));
     fill_gemv_operands(a_buf.data(), x_buf.data(), M, N);
@@ -1123,7 +1125,7 @@ TEST(nntrainer_cpu_backend_standalone, hgemv_tail_guard_page_is_armed_n) {
   }
   sigaction(SIGSEGV, &old_sa, nullptr);
 
-  EXPECT_EQ(guard_fault_caught, 1);
+  EXPECT_EQ(static_cast<int>(guard_fault_caught), 1);
 }
 
 #endif
