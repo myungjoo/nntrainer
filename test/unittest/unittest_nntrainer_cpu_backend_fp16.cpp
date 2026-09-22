@@ -20,7 +20,9 @@
 #include <tuple>
 #include <vector>
 #if defined(__linux__) || defined(__ANDROID__)
+#include <csetjmp>
 #include <csignal>
+#include <cstring>
 #include <sys/mman.h>
 #include <unistd.h>
 #endif
@@ -950,20 +952,28 @@ TEST(nntrainer_cpu_backend_standalone, gemm_benchmark_comparison_1x3072x512) {
 
 /**
  * @brief Fill A (M x N, row-major) and X (N) with values that are exactly
- * representable in fp16 and whose products and partial sums stay exact, so the
- * gemv result can be compared against a float reference without tolerating
- * rounding noise.
+ * representable in fp16 and whose products and partial sums stay exact for the
+ * sizes used below, so the gemv result can be compared against a float
+ * reference without tolerating rounding noise. No value is zero, so a dropped
+ * or misplaced tail element always changes the result.
+ * @note Exactness holds because every product is a multiple of 0.125 with
+ * |product| <= 1.875; raising N (or alpha) past |result| = 256 would start
+ * rounding the fp16 store and invalidate the tight tolerance.
  */
 static void fill_gemv_operands(_FP16 *A, _FP16 *X, unsigned int M,
                                unsigned int N) {
   for (unsigned int i = 0; i < M * N; ++i) {
-    A[i] = static_cast<_FP16>((static_cast<int>(i % 7) - 3) * 0.5f);
+    const int t = static_cast<int>(i % 6);
+    A[i] = static_cast<_FP16>((t < 3 ? t - 3 : t - 2) * 0.5f);
   }
   for (unsigned int i = 0; i < N; ++i) {
-    X[i] = static_cast<_FP16>((static_cast<int>(i % 5) - 2) * 0.25f);
+    X[i] = static_cast<_FP16>((static_cast<int>(i % 5) + 1) * 0.25f);
   }
 }
 
+/**
+ * @brief Y = alpha * A * X + beta * Y, evaluated in float.
+ */
 static std::vector<float> reference_gemv(const _FP16 *A, const _FP16 *X,
                                          const _FP16 *Y, unsigned int M,
                                          unsigned int N, float alpha,
@@ -979,6 +989,9 @@ static std::vector<float> reference_gemv(const _FP16 *A, const _FP16 *X,
   return ref;
 }
 
+/**
+ * @brief Run one non-transposed fp16 gemv and check it against the reference.
+ */
 static void run_hgemv_case(unsigned int M, unsigned int N, float alpha,
                            float beta) {
   std::vector<_FP16> A(M * N);
@@ -1016,6 +1029,9 @@ TEST(nntrainer_cpu_backend_standalone, hgemv_tail_lengths) {
 class GuardedFP16Buffer {
 public:
   explicit GuardedFP16Buffer(size_t count) {
+    if (count == 0) {
+      return;
+    }
     const size_t page_size = static_cast<size_t>(sysconf(_SC_PAGESIZE));
     const size_t bytes = count * sizeof(_FP16);
     const size_t data_bytes = ((bytes + page_size - 1) / page_size) * page_size;
@@ -1079,21 +1095,36 @@ TEST(nntrainer_cpu_backend_standalone, hgemv_tail_does_not_read_past_operands) {
   }
 }
 
-#if GTEST_HAS_DEATH_TEST
-TEST(nntrainer_cpu_backend_standalone, hgemv_tail_guard_page_is_armed_n) {
-  EXPECT_EXIT(
-    {
-      GuardedFP16Buffer x_buf(13);
-      if (x_buf.data() == nullptr) {
-        _exit(0);
-      }
-      volatile _FP16 v = x_buf.data()[13];
-      (void)v;
-      _exit(0);
-    },
-    ::testing::KilledBySignal(SIGSEGV), "");
+static sigjmp_buf guard_fault_jmp;
+static volatile sig_atomic_t guard_fault_caught;
+
+static void guard_fault_handler(int) {
+  guard_fault_caught = 1;
+  siglongjmp(guard_fault_jmp, 1);
 }
-#endif
+
+TEST(nntrainer_cpu_backend_standalone, hgemv_tail_guard_page_is_armed_n) {
+  GuardedFP16Buffer x_buf(13);
+  if (x_buf.data() == nullptr) {
+    GTEST_SKIP() << "mmap/mprotect unavailable";
+  }
+
+  struct sigaction sa;
+  struct sigaction old_sa;
+  std::memset(&sa, 0, sizeof(sa));
+  sa.sa_handler = guard_fault_handler;
+  sigemptyset(&sa.sa_mask);
+  ASSERT_EQ(sigaction(SIGSEGV, &sa, &old_sa), 0);
+
+  guard_fault_caught = 0;
+  if (sigsetjmp(guard_fault_jmp, 1) == 0) {
+    volatile const _FP16 *past_end = x_buf.data() + 13;
+    (void)*past_end;
+  }
+  sigaction(SIGSEGV, &old_sa, nullptr);
+
+  EXPECT_EQ(guard_fault_caught, 1);
+}
 
 #endif
 

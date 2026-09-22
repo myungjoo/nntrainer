@@ -303,6 +303,7 @@ void hgemv(const __fp16 *A, const __fp16 *X, __fp16 *Y, uint32_t M, uint32_t N,
       x0_3 = vmulq_n_f32(x0_3, alpha);
     }
 
+    // only lanes < rem are rewritten below, so the rest stay zero for every j
     __fp16 w_tmp[4] = {0, 0, 0, 0};
 
     for (unsigned int j = 0; j < M; ++j) {
