@@ -53,8 +53,11 @@ expect_checker() {
   fi
 }
 
-# Every listed word must actually fail the checker.
-while read -r word; do
+# Every listed word must actually fail the checker. The || [[ -n "$word" ]]
+# keeps a final entry written without a trailing newline from being skipped
+# here, which would leave it unverified for exactly the silent-pass reason
+# this self-test exists to catch.
+while IFS= read -r word || [[ -n "$word" ]]; do
   word=${word%$'\r'}
   [[ -z "$word" ]] && continue
   expect_checker 1 "prohibited word ${word}" "A line that mentions ${word} inline."
