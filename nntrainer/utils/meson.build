@@ -8,10 +8,15 @@ util_sources = [
   'fp16.cpp',
   'util_simd.cpp',
   'mman_windows.cpp',
-  'thread_manager.cpp',
-  'thread_manager_util.cpp',
   'safetensors_util.cpp',
 ]
+
+# test/unittest reuses this list.
+thread_manager_sources = [
+  'thread_manager.cpp',
+  'thread_manager_util.cpp',
+]
+util_sources += thread_manager_sources
 
 util_headers = [
   'base_properties.h',
