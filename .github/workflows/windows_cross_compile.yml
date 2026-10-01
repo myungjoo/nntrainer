@@ -101,7 +101,8 @@ jobs:
 
           # 2. Create a fresh build configuration for the current runner
           # We use the native config because we are running on the target architecture (ARM64)
-          meson setup build_cross --native-file configurations/windows-native.ini
+          # enable-fp16 must match windows-cross-arm-ci.ini so the FP16 tests are registered.
+          meson setup build_cross --native-file configurations/windows-native.ini -Denable-fp16=true
 
           # 3. Overlay the cross-compiled binaries into the fresh build directory
           # We use robocopy to exclude build system files (build.ninja, meson-*, etc.)
