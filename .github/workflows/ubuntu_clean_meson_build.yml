@@ -16,6 +16,10 @@ jobs:
       matrix:
         os: [ ubuntu-22.04 ]
         meson_options: [ "-Denable-fp16=false", "-Denable-fp16=true" ]
+        include:
+          # Native aarch64: the only leg that executes the ARM NEON FP16 kernels.
+          - os: ubuntu-22.04-arm
+            meson_options: "-Denable-fp16=true"
 
     steps:
     - uses: actions/checkout@v4
