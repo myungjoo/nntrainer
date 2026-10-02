@@ -69,9 +69,12 @@ void hgemv(const __fp16 *A, const __fp16 *X, __fp16 *Y, uint32_t M, uint32_t N,
            float alpha, float beta) {
   const unsigned int batch = 0;
   const __fp16 *__restrict x;
-  float *Y32 = new float[M];
+  float *Y32 = new float[M]();
 
   unsigned int idx = 0;
+  // Y may be uninitialized when beta is zero, so it must not be read.
+  if (std::fpclassify(beta) == FP_ZERO)
+    idx = M;
 
   for (; M - idx >= 8; idx += 8) {
     float32x4_t y0_3 = vcvt_f32_f16(vld1_f16(&Y[idx]));
@@ -326,8 +329,11 @@ void hgemv(const __fp16 *A, const __fp16 *X, __fp16 *Y, uint32_t M, uint32_t N,
 
 void hgemv_transpose(const __fp16 *A, const __fp16 *X, __fp16 *Y, uint32_t M,
                      uint32_t N, float alpha, float beta) {
-  float *Y32 = new float[N];
+  float *Y32 = new float[N]();
   unsigned int idx = 0;
+  // Y may be uninitialized when beta is zero, so it must not be read.
+  if (std::fpclassify(beta) == FP_ZERO)
+    idx = N;
   for (; N - idx >= 8; idx += 8) {
     float32x4_t y0_3_32 = vcvt_f32_f16(vld1_f16(&Y[idx]));
     float32x4_t y4_7_32 = vcvt_f32_f16(vld1_f16(&Y[idx + 4]));

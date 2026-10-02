@@ -15,6 +15,7 @@
 #include "util_func.h"
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <nntrainer_error.h>
 #include <tensor.h>
 #include <tensor_dim.h>
@@ -3356,6 +3357,68 @@ TEST(nntrainer_Tensor, sum_02_n) {
   GEN_TEST_INPUT(input, i * (batch * height) + j * (width) + k);
 
   EXPECT_THROW({ input.sum(-1); }, std::out_of_range);
+}
+
+/**
+ * @brief Sum along each axis into an output filled with NaN, as an
+ * uninitialized buffer may be; with beta = 0 the output must not be read.
+ */
+TEST(nntrainer_Tensor, sum_into_nan_output_beta_zero_p) {
+  nntrainer::TensorDim::TensorType t_type = {nntrainer::Tformat::NCHW,
+                                             nntrainer::Tdatatype::FP16};
+  nntrainer::Tensor input(3, 2, 9, 10, t_type);
+  input.setValue(1.0f);
+
+  for (unsigned int axis = 0; axis < 4; ++axis) {
+    nntrainer::TensorDim out_dim = input.getDim();
+    out_dim.setTensorDim(axis, 1);
+    nntrainer::Tensor output(out_dim);
+    output.setValue(std::numeric_limits<float>::quiet_NaN());
+
+    input.sum(axis, output);
+
+    const float expected =
+      static_cast<float>(input.getDim().getTensorDim(axis));
+    for (unsigned int i = 0; i < output.size(); ++i)
+      ASSERT_EQ(static_cast<float>(output.getData<_FP16>()[i]), expected)
+        << "axis " << axis << " index " << i;
+  }
+}
+
+/**
+ * @brief Sum with beta != 0 must still accumulate into the output
+ */
+TEST(nntrainer_Tensor, sum_accumulate_beta_nonzero_p) {
+  nntrainer::TensorDim::TensorType t_type = {nntrainer::Tformat::NCHW,
+                                             nntrainer::Tdatatype::FP16};
+  nntrainer::Tensor input(3, 2, 9, 10, t_type);
+  input.setValue(1.0f);
+
+  for (unsigned int axis = 0; axis < 4; ++axis) {
+    nntrainer::TensorDim out_dim = input.getDim();
+    out_dim.setTensorDim(axis, 1);
+    nntrainer::Tensor output(out_dim);
+    output.setValue(2.0f);
+
+    input.sum(axis, output, 1.0f, 0.5f);
+
+    const float expected =
+      static_cast<float>(input.getDim().getTensorDim(axis)) + 1.0f;
+    for (unsigned int i = 0; i < output.size(); ++i)
+      ASSERT_EQ(static_cast<float>(output.getData<_FP16>()[i]), expected)
+        << "axis " << axis << " index " << i;
+  }
+}
+
+/**
+ * @brief Sum along an axis that does not exist must throw
+ */
+TEST(nntrainer_Tensor, sum_into_output_invalid_axis_n) {
+  nntrainer::TensorDim::TensorType t_type = {nntrainer::Tformat::NCHW,
+                                             nntrainer::Tdatatype::FP16};
+  nntrainer::Tensor input(3, 2, 9, 10, t_type);
+  nntrainer::Tensor output(3, 2, 9, 10, t_type);
+  EXPECT_THROW(input.sum(4, output), std::out_of_range);
 }
 
 TEST(nntrainer_Tensor, sum_02_p) {
