@@ -827,7 +827,7 @@ Tensor &HalfTensor::dot(Tensor const &input, Tensor &output, bool trans,
     for (size_t i = 0; i < prev.size(); ++i) {
       const float v =
         static_cast<float>(rdata[i]) + beta * static_cast<float>(prev[i]);
-      rdata[i] = static_cast<_FP16>(std::min(std::max(v, -65504.f), 65504.f));
+      rdata[i] = static_cast<_FP16>(v);
     }
     break;
   }
