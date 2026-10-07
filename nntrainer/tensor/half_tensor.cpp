@@ -816,19 +816,9 @@ Tensor &HalfTensor::dot(Tensor const &input, Tensor &output, bool trans,
     _FP16 *rdata = output.getData<_FP16>();
     const _FP16 lb = static_cast<_FP16>(-65504.0f);
     const _FP16 ub = static_cast<_FP16>(65504.0f);
-    // The KAI kernel overwrites its destination, so keep what it must be
-    // accumulated into when beta is not zero.
-    std::vector<_FP16> prev;
-    if (beta != 0.0f)
-      prev.assign(rdata, rdata + static_cast<size_t>(M) * N);
     nntr_gemm_qai8dxp_qsi4cxp_packed<_FP16>(M, N, K, (void *)data,
                                             (void *)kai_rhs, rdata, 2u,
                                             /*transB=*/true, lb, ub);
-    for (size_t i = 0; i < prev.size(); ++i) {
-      const float v =
-        static_cast<float>(rdata[i]) + beta * static_cast<float>(prev[i]);
-      rdata[i] = static_cast<_FP16>(std::min(std::max(v, -65504.f), 65504.f));
-    }
     break;
   }
   default:
