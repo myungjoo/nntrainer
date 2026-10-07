@@ -6664,6 +6664,142 @@ TEST(nntrainer_Tensor, dot_qs4cx_fp16_activation_beta_p) {
 }
 
 /**
+ * @brief beta scales what the output already held, element by element, and
+ *        with beta = 0 the output is not read at all.
+ */
+TEST(nntrainer_Tensor, dot_qs4cx_fp16_activation_beta_scaled_p) {
+  const unsigned int M = 2;
+  const unsigned int K = 16;
+  const unsigned int N = 8;
+  const float beta = 0.5f;
+
+  auto quantizer =
+    nntrainer::Quantization::createQuantizer(nntrainer::QScheme::QS4CX);
+  nntrainer::Tensor q =
+    quantizer->quantize(qs4cxDotWeight(K, N), nntrainer::Tdatatype::QS4CX);
+
+  nntrainer::Tensor a(
+    {1, 1, M, K, {nntrainer::Tformat::NCHW, nntrainer::Tdatatype::FP16}}, true);
+  for (unsigned int m = 0; m < M; ++m)
+    for (unsigned int k = 0; k < K; ++k)
+      a.setValue(0, 0, m, k,
+                 0.5f + 0.5f * std::sin(0.9f * static_cast<float>(k) +
+                                        2.3f * static_cast<float>(m)));
+
+  nntrainer::Tensor plain(
+    {1, 1, M, N, {nntrainer::Tformat::NCHW, nntrainer::Tdatatype::FP16}}, true);
+  plain.setValue(std::numeric_limits<float>::quiet_NaN());
+  a.dot(q, plain, false, false, 0.0f);
+
+  nntrainer::Tensor accumulated(
+    {1, 1, M, N, {nntrainer::Tformat::NCHW, nntrainer::Tdatatype::FP16}}, true);
+  auto previous = [](unsigned int m, unsigned int n) {
+    return 0.25f * static_cast<float>(m * N + n) - 1.0f;
+  };
+  for (unsigned int m = 0; m < M; ++m)
+    for (unsigned int n = 0; n < N; ++n)
+      accumulated.setValue(0, 0, m, n, previous(m, n));
+  a.dot(q, accumulated, false, false, beta);
+
+  for (unsigned int m = 0; m < M; ++m) {
+    for (unsigned int n = 0; n < N; ++n) {
+      const float base = static_cast<float>(plain.getValue<_FP16>(0, 0, m, n));
+      const float got =
+        static_cast<float>(accumulated.getValue<_FP16>(0, 0, m, n));
+      ASSERT_TRUE(std::isfinite(base)) << " at m=" << m << ", n=" << n;
+      EXPECT_NEAR(got, base + beta * previous(m, n),
+                  0.02f + 0.01f * std::fabs(base))
+        << " at m=" << m << ", n=" << n;
+    }
+  }
+}
+
+/**
+ * @brief A beta * previous term that leaves the FP16 range saturates at the
+ *        largest finite FP16 instead of becoming infinite.
+ */
+TEST(nntrainer_Tensor, dot_qs4cx_fp16_activation_beta_saturates_p) {
+  const unsigned int M = 2;
+  const unsigned int K = 16;
+  const unsigned int N = 8;
+  const float fp16_max = 65504.0f;
+
+  auto quantizer =
+    nntrainer::Quantization::createQuantizer(nntrainer::QScheme::QS4CX);
+  nntrainer::Tensor q =
+    quantizer->quantize(qs4cxDotWeight(K, N), nntrainer::Tdatatype::QS4CX);
+
+  nntrainer::Tensor a(
+    {1, 1, M, K, {nntrainer::Tformat::NCHW, nntrainer::Tdatatype::FP16}}, true);
+  for (unsigned int m = 0; m < M; ++m)
+    for (unsigned int k = 0; k < K; ++k)
+      a.setValue(0, 0, m, k,
+                 0.5f + 0.5f * std::sin(0.9f * static_cast<float>(k) +
+                                        2.3f * static_cast<float>(m)));
+
+  nntrainer::Tensor accumulated(
+    {1, 1, M, N, {nntrainer::Tformat::NCHW, nntrainer::Tdatatype::FP16}}, true);
+  for (unsigned int m = 0; m < M; ++m)
+    for (unsigned int n = 0; n < N; ++n)
+      accumulated.setValue(0, 0, m, n, (n % 2 == 0) ? fp16_max : -fp16_max);
+  a.dot(q, accumulated, false, false, 2.0f);
+
+  for (unsigned int m = 0; m < M; ++m)
+    for (unsigned int n = 0; n < N; ++n)
+      EXPECT_EQ(static_cast<float>(accumulated.getValue<_FP16>(0, 0, m, n)),
+                (n % 2 == 0) ? fp16_max : -fp16_max)
+        << " at m=" << m << ", n=" << n;
+}
+
+/**
+ * @brief A product that leaves the FP16 range and a beta * previous term that
+ *        brings the sum back into it give that finite sum: beta is applied
+ *        before the result is clamped, not to an already saturated product.
+ */
+TEST(nntrainer_Tensor, dot_qs4cx_fp16_activation_beta_cancels_overflow_p) {
+  const unsigned int M = 1;
+  const unsigned int K = 16;
+  const unsigned int N = 4;
+  const float fp16_max = 65504.0f;
+
+  // One positive value per output channel, large enough that the dequantized
+  // weight (about 7/15 of it) still takes the product out of the FP16 range.
+  nntrainer::Tensor w(1, 1, K, N);
+  for (unsigned int n = 0; n < N; ++n)
+    for (unsigned int k = 0; k < K; ++k)
+      w.setValue(0, 0, k, n, 12.0f + 4.0f * static_cast<float>(n));
+
+  auto quantizer =
+    nntrainer::Quantization::createQuantizer(nntrainer::QScheme::QS4CX);
+  nntrainer::Tensor q = quantizer->quantize(w, nntrainer::Tdatatype::QS4CX);
+  nntrainer::Tensor w_deq =
+    quantizer->dequantize(q, nntrainer::Tdatatype::FP32);
+
+  nntrainer::Tensor a(
+    {1, 1, M, K, {nntrainer::Tformat::NCHW, nntrainer::Tdatatype::FP16}}, true);
+  a.setValue(1024.0f);
+
+  nntrainer::Tensor accumulated(
+    {1, 1, M, N, {nntrainer::Tformat::NCHW, nntrainer::Tdatatype::FP16}}, true);
+  accumulated.setValue(-fp16_max);
+  a.dot(q, accumulated, false, false, 1.0f);
+
+  bool any_cancelled = false;
+  for (unsigned int n = 0; n < N; ++n) {
+    float product = 0.0f;
+    for (unsigned int k = 0; k < K; ++k)
+      product += 1024.0f * w_deq.getValue<float>(0, 0, k, n);
+    ASSERT_GT(product, fp16_max) << " at n=" << n;
+    const float expected = std::min(product - fp16_max, fp16_max);
+    any_cancelled = any_cancelled || expected < fp16_max;
+    EXPECT_NEAR(static_cast<float>(accumulated.getValue<_FP16>(0, 0, 0, n)),
+                expected, 64.0f + 1e-3f * expected)
+      << " at n=" << n;
+  }
+  EXPECT_TRUE(any_cancelled);
+}
+
+/**
  * @brief a QS4CX weight has no transposed form to ask for
  */
 TEST(nntrainer_Tensor, dot_qs4cx_fp16_activation_trans_n) {
