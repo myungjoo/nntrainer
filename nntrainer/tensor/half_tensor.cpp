@@ -789,6 +789,20 @@ Tensor &HalfTensor::dot(Tensor const &input, Tensor &output, bool trans,
       break;
     }
 #endif
+#if defined(__aarch64__) || defined(__ARM_ARCH_7A__) ||                        \
+  defined(__ANDROID__) || defined(__arm__) || defined(_M_ARM) ||               \
+  defined(_M_ARM64)
+    // The KAI kernel below overwrites its destination with a product already
+    // rounded and saturated to FP16, so nothing can be accumulated into it
+    // exactly. A non-zero beta takes the scalar reference instead, which adds
+    // beta * output in fp32 before its single clamp, as the x86 kernel does.
+    if (beta != 0.0f) {
+      gemm_qs4cx_fp16(M, N, K, (const _FP16 *)getData(),
+                      input.getData<uint8_t>(), input.getScale<float>(),
+                      output.getData<_FP16>(), beta);
+      break;
+    }
+#endif
     // The lazily built KAI rhs belongs to the weight, not to a process-wide
     // table: packF16Activation() stores it in the tensor's own packed_data, so
     // it is freed with the weight and can never be handed to the next tensor
