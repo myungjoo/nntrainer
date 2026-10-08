@@ -825,21 +825,6 @@ Tensor &HalfTensor::dot(Tensor const &input, Tensor &output, bool trans,
                                             (void *)kai_rhs, rdata, 2u,
                                             /*transB=*/true, lb, ub);
     for (size_t i = 0; i < prev.size(); ++i) {
-#if defined(__aarch64__) || defined(__ARM_ARCH_7A__) ||                        \
-  defined(__ANDROID__) || defined(__arm__) || defined(_M_ARM) ||               \
-  defined(_M_ARM64)
-      // The kernel saturates the product to the FP16 range before it returns
-      // it, so a saturated one no longer tells what beta * prev must be added
-      // to: take that element again in fp32, from the plain weight.
-      if (std::fabs(static_cast<float>(rdata[i])) >= 65504.f) {
-        const size_t n = i % N;
-        rdata[i] = prev[i];
-        gemm_qs4cx_fp16(1, 1, K, data + (i / N) * K,
-                        input.getData<uint8_t>() + n * ((K + 1) / 2),
-                        input.getScale<float>() + n, &rdata[i], beta);
-        continue;
-      }
-#endif
       const float v =
         static_cast<float>(rdata[i]) + beta * static_cast<float>(prev[i]);
       rdata[i] = static_cast<_FP16>(std::min(std::max(v, -65504.f), 65504.f));
