@@ -789,20 +789,6 @@ Tensor &HalfTensor::dot(Tensor const &input, Tensor &output, bool trans,
       break;
     }
 #endif
-#if defined(__aarch64__) || defined(__ARM_ARCH_7A__) ||                        \
-  defined(__ANDROID__) || defined(__arm__) || defined(_M_ARM) ||               \
-  defined(_M_ARM64)
-    // The KAI kernel below overwrites its destination with a product already
-    // rounded and saturated to FP16, so nothing can be accumulated into it
-    // exactly. A non-zero beta takes the scalar reference instead, which adds
-    // beta * output in fp32 before its single clamp, as the x86 kernel does.
-    if (beta != 0.0f) {
-      gemm_qs4cx_fp16(M, N, K, (const _FP16 *)getData(),
-                      input.getData<uint8_t>(), input.getScale<float>(),
-                      output.getData<_FP16>(), beta);
-      break;
-    }
-#endif
     // The lazily built KAI rhs belongs to the weight, not to a process-wide
     // table: packF16Activation() stores it in the tensor's own packed_data, so
     // it is freed with the weight and can never be handed to the next tensor
@@ -830,9 +816,34 @@ Tensor &HalfTensor::dot(Tensor const &input, Tensor &output, bool trans,
     _FP16 *rdata = output.getData<_FP16>();
     const _FP16 lb = static_cast<_FP16>(-65504.0f);
     const _FP16 ub = static_cast<_FP16>(65504.0f);
+    // The KAI kernel overwrites its destination, so keep what it must be
+    // accumulated into when beta is not zero.
+    std::vector<_FP16> prev;
+    if (beta != 0.0f)
+      prev.assign(rdata, rdata + static_cast<size_t>(M) * N);
     nntr_gemm_qai8dxp_qsi4cxp_packed<_FP16>(M, N, K, (void *)data,
                                             (void *)kai_rhs, rdata, 2u,
                                             /*transB=*/true, lb, ub);
+    for (size_t i = 0; i < prev.size(); ++i) {
+#if defined(__aarch64__) || defined(__ARM_ARCH_7A__) ||                        \
+  defined(__ANDROID__) || defined(__arm__) || defined(_M_ARM) ||               \
+  defined(_M_ARM64)
+      // The kernel saturates the product to the FP16 range before it returns
+      // it, so a saturated one no longer tells what beta * prev must be added
+      // to: take that element again in fp32, from the plain weight.
+      if (std::fabs(static_cast<float>(rdata[i])) >= 65504.f) {
+        const size_t n = i % N;
+        rdata[i] = prev[i];
+        gemm_qs4cx_fp16(1, 1, K, data + (i / N) * K,
+                        input.getData<uint8_t>() + n * ((K + 1) / 2),
+                        input.getScale<float>() + n, &rdata[i], beta);
+        continue;
+      }
+#endif
+      const float v =
+        static_cast<float>(rdata[i]) + beta * static_cast<float>(prev[i]);
+      rdata[i] = static_cast<_FP16>(std::min(std::max(v, -65504.f), 65504.f));
+    }
     break;
   }
   default:
